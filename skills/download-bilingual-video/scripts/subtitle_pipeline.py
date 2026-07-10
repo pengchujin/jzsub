@@ -37,11 +37,6 @@ SOURCE_WRAP_COLUMNS = 68
 CHINESE_WRAP_COLUMNS = 36
 ASS_PLAY_RES_X = 1920
 ASS_PLAY_RES_Y = 1080
-SOURCE_WIDTH_PER_COLUMN = 17.5
-CHINESE_WIDTH_PER_COLUMN = 23
-BACKGROUND_PADDING_X = 14
-BACKGROUND_PADDING_Y = 8
-BACKGROUND_MIN_WIDTH = 120
 
 
 class PipelineError(RuntimeError):
@@ -809,53 +804,6 @@ def _validate_font(font: str) -> str:
     return font.strip()
 
 
-def _rounded_rect_path(left: int, top: int, right: int, bottom: int, radius: int) -> str:
-    radius = max(1, min(radius, (right - left) // 2, (bottom - top) // 2))
-    control = max(1, round(radius * 0.55228475))
-    return (
-        f"m {left + radius} {top} "
-        f"l {right - radius} {top} "
-        f"b {right - radius + control} {top} {right} {top + radius - control} {right} {top + radius} "
-        f"l {right} {bottom - radius} "
-        f"b {right} {bottom - radius + control} {right - radius + control} {bottom} {right - radius} {bottom} "
-        f"l {left + radius} {bottom} "
-        f"b {left + radius - control} {bottom} {left} {bottom - radius + control} {left} {bottom - radius} "
-        f"l {left} {top + radius} "
-        f"b {left} {top + radius - control} {left + radius - control} {top} {left + radius} {top}"
-    )
-
-
-def _ass_background_bounds(
-    source_chunks: Sequence[str], chinese_chunks: Sequence[str]
-) -> tuple[int, int, int, int]:
-    source_width = max((_display_width(line.rstrip("\n")) for line in source_chunks), default=0)
-    chinese_width = max((_display_width(line.rstrip("\n")) for line in chinese_chunks), default=0)
-    content_width = max(
-        round(source_width * SOURCE_WIDTH_PER_COLUMN),
-        chinese_width * CHINESE_WIDTH_PER_COLUMN,
-    )
-    width = max(
-        BACKGROUND_MIN_WIDTH,
-        min(1760, content_width + BACKGROUND_PADDING_X * 2),
-    )
-    height = (
-        len(source_chunks) * 50
-        + len(chinese_chunks) * 55
-        + BACKGROUND_PADDING_Y * 2
-    )
-    center_x = ASS_PLAY_RES_X // 2
-    bottom = ASS_PLAY_RES_Y - 60
-    left = center_x - width // 2
-    right = left + width
-    top = max(24, bottom - height)
-    return left, top, right, bottom
-
-
-def _ass_background_path(source_chunks: Sequence[str], chinese_chunks: Sequence[str]) -> str:
-    left, top, right, bottom = _ass_background_bounds(source_chunks, chinese_chunks)
-    return _rounded_rect_path(left, top, right, bottom, 16)
-
-
 def _render_ass(
     manifest: dict[str, Any], translations: dict[str, str], font: str
 ) -> str:
@@ -874,7 +822,8 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Original,{font},42,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,80,80,70,1
 Style: Chinese,{font},46,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,80,80,70,1
-Style: Background,{font},1,&H78000000,&H78000000,&H78000000,&H78000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: BackgroundOriginal,{font},42,&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,3,8,0,2,80,80,70,1
+Style: BackgroundChinese,{font},46,&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,3,8,0,2,80,80,70,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -896,9 +845,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start = _ass_timestamp(segment["start_ms"])
         end_ms = max(segment["end_ms"], segment["start_ms"] + 10)
         end = _ass_timestamp(end_ms, end=True)
-        background = _ass_background_path(source_chunks, chinese_chunks)
+        background_text = (
+            f"{escaped_source}"
+            f"\\N{{\\rBackgroundChinese}}{escaped_chinese}"
+        )
         dialogue.append(
-            f"Dialogue: 0,{start},{end},Background,,0,0,0,,{{\\an7\\p1}}{background}"
+            f"Dialogue: 0,{start},{end},BackgroundOriginal,,0,0,0,,{background_text}"
         )
         text = f"{escaped_source}\\N{{\\rChinese}}{escaped_chinese}"
         dialogue.append(f"Dialogue: 1,{start},{end},Original,,0,0,0,,{text}")

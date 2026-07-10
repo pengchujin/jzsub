@@ -118,7 +118,7 @@ Generate and validate:
 - source-only SRT;
 - Simplified Chinese SRT;
 - bilingual SRT;
-- styled bilingual ASS in MiSans Bold with source above and Chinese below, wider English wrapping, and a tightly fitted semi-transparent rounded-rectangle background per cue;
+- styled bilingual ASS in MiSans Bold with source above and Chinese below, wider English wrapping, and a semi-transparent background measured by libass from the exact same text, font, size, and line breaks as each caption;
 - a validation report proving the locked source hash and per-segment source hashes still match.
 
 Treat this report as structural/source-integrity validation only, not proof of translation quality. Stop before burn-in if any hard validation fails. Sample-read the opening, a dense middle section, and the ending for context and terminology before describing the translation as reviewed.

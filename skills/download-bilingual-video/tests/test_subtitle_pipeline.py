@@ -269,7 +269,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         pipeline.render(manifest_path, translations_dir, output_dir, "Noto Sans")
         pipeline.validate(manifest_path, translations_dir, output_dir, "Noto Sans")
 
-    def test_chinese_house_style_and_rounded_background(self) -> None:
+    def test_chinese_house_style_and_measured_background(self) -> None:
         source = "This English subtitle is intentionally longer than forty-two columns but should remain on one display line"
         manifest_path, manifest = self.prepare_fixture(
             srt([("00:00:00,000", "00:00:03,000", source)])
@@ -301,25 +301,43 @@ class SubtitlePipelineTests(unittest.TestCase):
         rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
         self.assertIn("Style: Original,MiSans,42", rendered)
         self.assertIn("Style: Chinese,MiSans,46", rendered)
-        self.assertIn("Style: Background", rendered)
+        self.assertIn("Style: BackgroundOriginal,MiSans,42", rendered)
+        self.assertIn("Style: BackgroundChinese,MiSans,46", rendered)
+        self.assertIn(",3,8,0,2,80,80,70,1", rendered)
         self.assertIn("Dialogue: 0,", rendered)
-        self.assertIn(r"{\an7\p1}m ", rendered)
+        self.assertNotIn(r"{\an7\p1}", rendered)
         self.assertIn("Dialogue: 1,", rendered)
         pipeline.validate(manifest_path, translations_dir, output_dir)
 
-    def test_background_tightly_tracks_caption_dimensions(self) -> None:
-        short = pipeline._ass_background_bounds(["Hi"], ["你好"])
-        medium = pipeline._ass_background_bounds(
-            ["stream that I've ever seen, but then"],
-            ["思绪倾泻 但随后却能得到"],
+    def test_background_uses_identical_text_layout_for_libass_measurement(self) -> None:
+        source = "日本語の字幅は Latin text と同じではありません"
+        manifest_path, manifest = self.prepare_fixture(
+            srt([("00:00:00,000", "00:00:03,000", source)]),
+            source_language="ja",
         )
+        segment = manifest["segments"][0]
+        translations_dir = self.write_translations(
+            manifest,
+            records=[
+                {
+                    "id": segment["id"],
+                    "source_sha256": segment["source_sha256"],
+                    "zh_cn": "日文字形宽度与拉丁文字不同",
+                }
+            ],
+        )
+        output_dir = self.root / "output"
+        pipeline.render(manifest_path, translations_dir, output_dir)
+        rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
 
-        short_width = short[2] - short[0]
-        medium_width = medium[2] - medium[0]
-        self.assertEqual(short_width, pipeline.BACKGROUND_MIN_WIDTH)
-        self.assertLess(medium_width, 760)
-        self.assertGreater(medium_width, short_width)
-        self.assertEqual(medium[3] - medium[1], 121)
+        self.assertIn("Style: BackgroundOriginal,MiSans,42", rendered)
+        self.assertIn("Style: BackgroundChinese,MiSans,46", rendered)
+        self.assertIn(",3,8,0,2,80,80,70,1", rendered)
+        self.assertNotIn(r"{\an7\p1}", rendered)
+        self.assertIn(
+            source + r"\N{\rBackgroundChinese}日文字形宽度与拉丁文字不同",
+            rendered,
+        )
 
     def test_smart_mode_groups_only_whole_adjacent_cues(self) -> None:
         raw = srt(

@@ -59,7 +59,7 @@ Do not include `source`, timestamps, Markdown, comments, explanations, or extra 
 - Keep source content and layout separate. Insert display line breaks only during SRT/ASS rendering and verify that removing those known layout breaks reconstructs the source ledger exactly.
 - Encode ASS control characters only in the render artifact. Follow FFmpeg's safe-text strategy: guard literal backslashes with an invisible U+2060 WORD JOINER and neutralize opening braces, then verify the encoding round-trip. This does not modify the raw subtitle, locked ledger, or source SRT.
 - Split long Chinese lines at semantic pauses. Keep English/source lines wider than Chinese lines and split source display lines only at existing whitespace or grapheme boundaries, without inserting hyphens, ellipses, or replacement characters.
-- Render the bilingual ASS over a per-cue semi-transparent rounded rectangle so both languages remain legible over busy footage.
+- Render a transparent duplicate of the exact bilingual text behind the visible caption using libass `BorderStyle=3`. Keep its font, size, style resets, alignment, margins, and line breaks identical to the visible event so libass measures the background from real glyph layout instead of estimated character widths.
 
 ## Quality control
 

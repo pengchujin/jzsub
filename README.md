@@ -10,7 +10,7 @@
 - 原字幕按字节锁定，翻译过程不能修改原文
 - 由当前 Codex 会话的默认 GPT 直接翻译，不启动 Ollama、MLX、llama.cpp 等本地模型
 - 生成原文、简体中文、双语 SRT 和带样式 ASS
-- 默认使用 MiSans Bold、紧凑圆角背景，英文在上、中文在下
+- 默认使用 MiSans Bold，原文在上、中文在下；背景由 libass 按实际字形、字号和换行精确测量，不再用字符数估算
 - 自动消除滚动式自动字幕的显示时间重叠
 - 使用 libass 将双语字幕一次性烧录为 H.264/AAC MP4
 - macOS 默认 FFmpeg 缺少 libass 时自动选择 Homebrew `ffmpeg-full`
