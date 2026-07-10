@@ -1,4 +1,4 @@
-# Download Bilingual Video Skill
+# JZSub
 
 一个面向 Codex 的视频下载与双语字幕 Skill。支持 YouTube、Bilibili 及其他 yt-dlp 平台，在用户有权访问内容的前提下下载最高可用画质、封面和原语言字幕，并生成中英/中外文对照字幕及硬字幕 MP4。
 
@@ -24,13 +24,13 @@
 ```bash
 git clone https://github.com/pengchujin/download-bilingual-video-skill.git
 mkdir -p ~/.codex/skills
-cp -R download-bilingual-video-skill/skills/download-bilingual-video ~/.codex/skills/
+cp -R download-bilingual-video-skill/skills/jzsub ~/.codex/skills/
 ```
 
 然后在 Codex 中使用：
 
 ```text
-$download-bilingual-video https://www.youtube.com/watch?v=VIDEO_ID
+$jzsub https://www.youtube.com/watch?v=VIDEO_ID
 ```
 
 ## 依赖
@@ -58,7 +58,7 @@ MiSans 字体不包含在本仓库中。请从[小米 HyperOS 官方页面](http
 公开内容默认先匿名探测，仅在登录、反机器人或 HTTP 401/403 错误时静默读取 Chrome：
 
 ```bash
-python3 skills/download-bilingual-video/scripts/fetch_video.py \
+python3 skills/jzsub/scripts/fetch_video.py \
   "https://www.youtube.com/watch?v=VIDEO_ID" \
   --output-dir ~/Downloads/video-job \
   --browser-cookies auto
@@ -67,7 +67,7 @@ python3 skills/download-bilingual-video/scripts/fetch_video.py \
 Bilibili 会员画质等已知需要登录的内容可直接使用：
 
 ```bash
-python3 skills/download-bilingual-video/scripts/fetch_video.py \
+python3 skills/jzsub/scripts/fetch_video.py \
   "https://www.bilibili.com/video/BV_ID" \
   --output-dir ~/Downloads/video-job \
   --browser-cookies chrome
@@ -78,11 +78,11 @@ python3 skills/download-bilingual-video/scripts/fetch_video.py \
 ## 验证
 
 ```bash
-python3 skills/download-bilingual-video/scripts/fetch_video.py --self-test
+python3 skills/jzsub/scripts/fetch_video.py --self-test
 python3 -m unittest discover \
-  -s skills/download-bilingual-video/tests \
+  -s skills/jzsub/tests \
   -v
-python3 skills/download-bilingual-video/scripts/verify_delivery.py \
+python3 skills/jzsub/scripts/verify_delivery.py \
   /path/to/video-job/download-manifest.json
 ```
 

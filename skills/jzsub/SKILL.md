@@ -1,9 +1,9 @@
 ---
-name: download-bilingual-video
-description: Download videos from YouTube, Bilibili, and other yt-dlp-supported platforms at the highest available quality; save an MP4 master when possible, the cover image, and original foreign-language subtitles; translate into Simplified Chinese without changing source wording; generate bilingual SRT/ASS; and burn captions into an MP4. Use when a user supplies a video URL and asks to download, convert to MP4, use a logged-in Chrome session, preserve and translate subtitles, create bilingual captions, or hard-burn subtitles.
+name: jzsub
+description: JZSub downloads videos from YouTube, Bilibili, and other yt-dlp-supported platforms at the highest available quality; saves an MP4 master when possible, the cover image, and original foreign-language subtitles; translates into Simplified Chinese without changing source wording; generates bilingual SRT/ASS; and burns captions into an MP4. Use when a user supplies a video URL and asks to download, convert to MP4, use a logged-in Chrome session, preserve and translate subtitles, create bilingual captions, or hard-burn subtitles.
 ---
 
-# Download Bilingual Video
+# JZSub
 
 Download one authorized video at a time, keep an audit-safe copy of its source subtitles, and produce a Chinese/source bilingual MP4.
 
