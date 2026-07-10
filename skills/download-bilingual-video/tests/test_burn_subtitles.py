@@ -92,6 +92,23 @@ class BurnSubtitleValidationTests(unittest.TestCase):
 
         self.assertEqual(args.validation_report, Path("reviewed.json"))
 
+    def test_selects_libass_capable_ffmpeg_full_when_path_build_lacks_it(self) -> None:
+        default = self.root / "bin" / "ffmpeg"
+        full = self.root / "opt" / "ffmpeg-full" / "bin" / "ffmpeg"
+        default.parent.mkdir(parents=True)
+        full.parent.mkdir(parents=True)
+        default.write_text("", encoding="utf-8")
+        full.write_text("", encoding="utf-8")
+
+        with mock.patch.object(
+            burn,
+            "_ffmpeg_has_subtitles_filter",
+            side_effect=lambda path: Path(path) == full,
+        ):
+            selected = burn._select_libass_ffmpeg(str(default), candidates=[full])
+
+        self.assertEqual(selected, str(full))
+
     def test_rejects_output_duration_mismatch(self) -> None:
         input_video = {
             "codec_type": "video",

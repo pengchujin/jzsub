@@ -25,7 +25,7 @@ Download one authorized video at a time, keep an audit-safe copy of its source s
 
 - Treat a single video as the default. Process a playlist or channel only when the user explicitly requests bulk download.
 - Require `yt-dlp`, `ffmpeg`, `ffprobe`, and Python 3.10 or newer.
-- Verify that `ffmpeg -hide_banner -filters` lists the `subtitles` filter. If it does not, explain that a libass-enabled FFmpeg build is required before promising a burned deliverable.
+- Verify that `ffmpeg -hide_banner -filters` lists the `subtitles` filter. On macOS, `burn_subtitles.py` automatically prefers Homebrew `ffmpeg-full` when the default PATH build lacks libass. If neither build provides the filter, explain that a libass-enabled FFmpeg build is required before promising a burned deliverable.
 - Use Xiaomi's MiSans Bold as the default subtitle face. Verify that the `MiSans` family is installed locally; if absent, obtain `MiSans-Bold.ttf` from the [official HyperOS download page](https://hyperos.mi.com/font/zh/download/) under its displayed license. Install it for the current user, do not redistribute the standalone font in the Skill, and note MiSans usage in generated ASS/software metadata.
 - For YouTube, require a supported JavaScript runtime. Prefer Deno 2.3 or newer. Read [platform-notes.md](references/platform-notes.md) when YouTube extraction, formats, subtitles, or PO Tokens fail.
 - Choose an output directory with enough free space for the source intermediate and the separately encoded burned MP4.

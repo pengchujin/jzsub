@@ -27,6 +27,10 @@ HDR_SIDE_DATA = (
     "hdr10+",
     "mastering display",
 )
+FFMPEG_FULL_CANDIDATES = (
+    Path("/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"),
+    Path("/usr/local/opt/ffmpeg-full/bin/ffmpeg"),
+)
 
 
 class BurnError(RuntimeError):
@@ -89,7 +93,36 @@ def _required_executables() -> tuple[str, str]:
     if missing:
         raise BurnError(f"required executable not found in PATH: {', '.join(missing)}")
     assert ffmpeg is not None and ffprobe is not None
+    ffmpeg = _select_libass_ffmpeg(ffmpeg)
+    sibling_ffprobe = Path(ffmpeg).with_name("ffprobe")
+    if sibling_ffprobe.is_file():
+        ffprobe = str(sibling_ffprobe)
     return ffmpeg, ffprobe
+
+
+def _ffmpeg_has_subtitles_filter(ffmpeg: str | Path) -> bool:
+    result = subprocess.run(
+        [str(ffmpeg), "-hide_banner", "-filters"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0 and any(
+        len(fields := line.split()) >= 2 and fields[1] == "subtitles"
+        for line in result.stdout.splitlines()
+    )
+
+
+def _select_libass_ffmpeg(
+    default: str,
+    *,
+    candidates: Sequence[Path] = FFMPEG_FULL_CANDIDATES,
+) -> str:
+    for candidate in (Path(default), *candidates):
+        if candidate.is_file() and _ffmpeg_has_subtitles_filter(candidate):
+            return str(candidate)
+    return default
 
 
 def _require_libass_subtitles_filter(ffmpeg: str) -> None:
