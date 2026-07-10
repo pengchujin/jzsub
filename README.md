@@ -1,25 +1,66 @@
-# JZSub
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="JZSub — 一条链接自动交付双语字幕 MP4" width="100%">
+</p>
 
-一个面向 Codex 的视频下载与双语字幕 Skill。支持 YouTube、Bilibili 及其他 yt-dlp 平台，在用户有权访问内容的前提下下载最高可用画质、封面和原语言字幕，并生成中英/中外文对照字幕及硬字幕 MP4。
+<p align="center">
+  <a href="https://github.com/pengchujin/jzsub/releases/latest"><img src="https://img.shields.io/github/v/release/pengchujin/jzsub?style=flat-square&color=18a87b" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/pengchujin/jzsub?style=flat-square" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/Codex-Skill-111827?style=flat-square" alt="Codex Skill">
+  <img src="https://img.shields.io/badge/GPT-双语翻译-0f766e?style=flat-square" alt="GPT 双语翻译">
+</p>
 
-## 功能
+<p align="center"><b>给 JZSub 一个视频链接，拿回最高画质视频、封面、双语字幕和烧录完成的 MP4。</b></p>
 
-- 使用 `bv*+ba/b` 下载最高可用质量，保留最高质量中间文件
-- 尽可能无损封装 MP4，避免重复有损转码
-- 下载并转换封面为 JPEG
-- 原字幕按字节锁定，翻译过程不能修改原文
-- 由当前 Codex 会话的默认 GPT 直接翻译，不启动 Ollama、MLX、llama.cpp 等本地模型
-- 生成原文、简体中文、双语 SRT 和带样式 ASS
-- 默认使用 MiSans Bold，原文在上、中文在下；背景由 libass 按实际字形、字号和换行精确测量，不再用字符数估算
-- 自动消除滚动式自动字幕的显示时间重叠
-- 使用 libass 将双语字幕一次性烧录为 H.264/AAC MP4
-- macOS 默认 FFmpeg 缺少 libass 时自动选择 Homebrew `ffmpeg-full`
-- 内置交付门槛：有源字幕时，翻译、渲染或烧录未完成都会返回未完成状态，不能把仅下载视频误报为成功
-- 下载到源字幕后自动准备 GPT 翻译批次，并以 `bilingual_required`/退出码 3 强制流程继续；退出码 3 是非终态，不是下载失败
-- 静默认证：匿名失败后可直接读取 Chrome 登录态，不导出 Cookie、不打开视频页
-- 平台没有合适字幕时直接交付视频、MP4、封面和清单
+## 支持的平台
 
-## 安装
+<table align="center">
+  <tr>
+    <td align="center" width="110"><img src="docs/assets/platforms/youtube.svg" width="46" height="46" alt="YouTube"><br><sub>YouTube</sub></td>
+    <td align="center" width="110"><img src="docs/assets/platforms/bilibili.svg" width="46" height="46" alt="Bilibili"><br><sub>Bilibili</sub></td>
+    <td align="center" width="110"><img src="docs/assets/platforms/vimeo.svg" width="46" height="46" alt="Vimeo"><br><sub>Vimeo</sub></td>
+    <td align="center" width="110"><img src="docs/assets/platforms/twitch.svg" width="46" height="46" alt="Twitch"><br><sub>Twitch</sub></td>
+    <td align="center" width="110"><img src="docs/assets/platforms/dailymotion.svg" width="46" height="46" alt="Dailymotion"><br><sub>Dailymotion</sub></td>
+    <td align="center" width="110"><img src="docs/assets/platforms/tiktok.svg" width="46" height="46" alt="TikTok"><br><sub>TikTok</sub></td>
+  </tr>
+</table>
+
+<p align="center"><sub>以及 yt-dlp 支持的其他站点。实际可用格式、字幕和登录要求由平台决定。</sub></p>
+
+## 主要功能
+
+- **最高画质**：下载最佳视频与音频，尽可能无损封装 MP4
+- **双语字幕**：保留原文，由当前 Codex 默认 GPT 翻译成简体中文
+- **自动烧录**：MiSans 字幕、精确背景、libass 渲染、H.264/AAC MP4
+- **封面直取**：自动下载并转换为 JPEG
+- **静默登录**：需要时直接读取 Chrome 登录态，不导出 Cookie
+- **无字幕也能用**：平台没有字幕时直接交付视频、MP4 和封面
+
+## 视频前后对比
+
+<p align="center">
+  <img src="docs/assets/examples/before-after.jpg" alt="原片与 JZSub 双语字幕烧录效果对比" width="100%">
+</p>
+
+<p align="center"><sub>左：下载后的原片　·　右：JZSub 生成并烧录的原文＋中文双语字幕</sub></p>
+
+## 封面自动获取
+
+<table>
+  <tr>
+    <td width="64%"><img src="docs/assets/examples/cover.jpg" alt="JZSub 自动下载的视频封面" width="100%"></td>
+    <td valign="middle">
+      <h3>与视频一起交付</h3>
+      <p><code>cover.jpg</code></p>
+      <p>自动选择平台封面并转换为通用 JPEG，无需另存网页图片。</p>
+    </td>
+  </tr>
+</table>
+
+## 在 Codex 中使用
+
+<p align="center">
+  <img src="docs/assets/codex-usage.svg" alt="在 Codex 中安装和使用 JZSub" width="100%">
+</p>
 
 ```bash
 git clone https://github.com/pengchujin/jzsub.git
@@ -27,72 +68,36 @@ mkdir -p ~/.codex/skills
 cp -R jzsub/skills/jzsub ~/.codex/skills/
 ```
 
-然后在 Codex 中使用：
+在 Codex 新任务中发送：
 
 ```text
 $jzsub https://www.youtube.com/watch?v=VIDEO_ID
 ```
 
+JZSub 会持续执行下载、GPT 翻译、字幕渲染、烧录与交付检查，不会停在仅下载完成的中间状态。
+
 ## 依赖
 
-- Python 3.10+
-- 当前版本的 `yt-dlp`
-- 带 libass `subtitles` 滤镜的 FFmpeg 与 ffprobe
-- Deno 2.3+（YouTube 完整提取能力）
-- Chrome（仅在目标内容需要现有登录态时）
-- MiSans Bold（字幕默认字体）
-
-字幕翻译不需要安装本地大模型、模型运行时或额外翻译服务；由执行 Skill 的当前 Codex 默认 GPT 直接完成。只有用户明确指定其他翻译引擎时才会改用其他方案。
-
-macOS + Homebrew 示例：
+Python 3.10+、yt-dlp、Deno 2.3+、带 libass 的 FFmpeg/ffprobe，以及 MiSans Bold。macOS 可运行：
 
 ```bash
 brew install yt-dlp ffmpeg-full deno
-export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$PATH"
 ```
 
-MiSans 字体不包含在本仓库中。请从[小米 HyperOS 官方页面](https://hyperos.mi.com/font/zh/download/)下载并按页面许可安装 `MiSans-Bold.ttf`。本 Skill 生成的 ASS 会注明使用 MiSans。
+MiSans 请从[小米 HyperOS 官方页面](https://hyperos.mi.com/font/zh/download/)获取；字体文件不包含在本仓库中。
 
-## 静默 Chrome 认证
+> 仅下载你有权访问和保存的内容。JZSub 不绕过 DRM、付费墙、验证码或平台安全限制。
 
-公开内容默认先匿名探测，仅在登录、反机器人或 HTTP 401/403 错误时静默读取 Chrome：
-
-```bash
-python3 skills/jzsub/scripts/fetch_video.py \
-  "https://www.youtube.com/watch?v=VIDEO_ID" \
-  --output-dir ~/Downloads/video-job \
-  --browser-cookies auto
-```
-
-Bilibili 会员画质等已知需要登录的内容可直接使用：
-
-```bash
-python3 skills/jzsub/scripts/fetch_video.py \
-  "https://www.bilibili.com/video/BV_ID" \
-  --output-dir ~/Downloads/video-job \
-  --browser-cookies chrome
-```
-
-该流程不会创建 `cookies.txt`，也不会把 Cookie 值写入日志或清单。只有需要用户重新登录或处理验证码时，才应打开浏览器进行交接。
-
-## 验证
+<details>
+<summary>开发者验证</summary>
 
 ```bash
 python3 skills/jzsub/scripts/fetch_video.py --self-test
-python3 -m unittest discover \
-  -s skills/jzsub/tests \
-  -v
-python3 skills/jzsub/scripts/verify_delivery.py \
-  /path/to/video-job/download-manifest.json
+python3 -m unittest discover -s skills/jzsub/tests -v
 ```
 
-## 安全与版权
-
-- 只下载用户有权访问和保存的内容
-- 不绕过 DRM、付费墙、验证码或平台安全限制
-- 不包含、导出或提交浏览器 Cookie
-- 不包含 MiSans 字体文件；字体受其官方许可约束
+</details>
 
 ## License
 
-本仓库中的 Skill 说明、脚本与测试采用 [MIT License](LICENSE)。第三方软件、平台内容和 MiSans 字体分别受其各自条款约束。
+[MIT](LICENSE) · 平台 Logo 与商标归各自权利人所有。

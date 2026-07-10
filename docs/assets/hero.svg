@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">JZSub</title>
+  <desc id="desc">一条视频链接 自动生成最高画质双语字幕视频</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111f"/>
+      <stop offset="0.55" stop-color="#13233b"/>
+      <stop offset="1" stop-color="#0a3b40"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#59d7ff"/>
+      <stop offset="1" stop-color="#7cf7b7"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="28"/></filter>
+  </defs>
+  <rect width="1280" height="360" rx="28" fill="url(#bg)"/>
+  <circle cx="1085" cy="65" r="170" fill="#2bd9c5" opacity=".13" filter="url(#glow)"/>
+  <circle cx="910" cy="335" r="150" fill="#2f8cff" opacity=".12" filter="url(#glow)"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+    <text x="72" y="122" fill="white" font-size="72" font-weight="800" letter-spacing="-2">JZSub</text>
+    <rect x="72" y="145" width="374" height="5" rx="2.5" fill="url(#accent)"/>
+    <text x="72" y="205" fill="#dceaff" font-size="27" font-weight="600">一条链接  自动交付双语字幕 MP4</text>
+    <text x="72" y="248" fill="#8fa9c7" font-size="20">最高画质 · GPT 翻译 · 原文锁定 · 封面下载 · 硬字幕烧录</text>
+    <g font-size="17" font-weight="700">
+      <rect x="72" y="282" width="91" height="38" rx="19" fill="#163d55"/><text x="95" y="307" fill="#70ddff">4K / HDR</text>
+      <rect x="176" y="282" width="113" height="38" rx="19" fill="#174739"/><text x="201" y="307" fill="#82f0bd">GPT 双语</text>
+      <rect x="302" y="282" width="108" height="38" rx="19" fill="#34345b"/><text x="327" y="307" fill="#b9b9ff">MiSans</text>
+    </g>
+    <g transform="translate(690 66)">
+      <rect width="492" height="228" rx="24" fill="#07101d" stroke="#31506e" stroke-width="2"/>
+      <circle cx="28" cy="28" r="6" fill="#ff6b6b"/><circle cx="48" cy="28" r="6" fill="#ffd66b"/><circle cx="68" cy="28" r="6" fill="#69e09c"/>
+      <rect x="28" y="58" width="436" height="48" rx="12" fill="#111f31"/>
+      <text x="48" y="89" fill="#e7f2ff" font-size="18" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">$jzsub https://youtube.com/watch?v=...</text>
+      <path d="M82 145H180" stroke="#3b658a" stroke-width="3"/><path d="M238 145H336" stroke="#3b658a" stroke-width="3"/>
+      <g font-size="15" text-anchor="middle" font-weight="700">
+        <rect x="28" y="126" width="108" height="40" rx="20" fill="#15334e"/><text x="82" y="151" fill="#7edaff">下载</text>
+        <rect x="190" y="126" width="108" height="40" rx="20" fill="#21402f"/><text x="244" y="151" fill="#91f0b7">翻译</text>
+        <rect x="352" y="126" width="112" height="40" rx="20" fill="#3c3049"/><text x="408" y="151" fill="#e5b9ff">烧录</text>
+      </g>
+      <text x="246" y="204" fill="#7f9bb9" font-size="16" text-anchor="middle">video.mp4  ·  cover.jpg  ·  bilingual.srt</text>
+    </g>
+  </g>
+</svg>
