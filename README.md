@@ -22,9 +22,9 @@
 ## 安装
 
 ```bash
-git clone https://github.com/pengchujin/download-bilingual-video-skill.git
+git clone https://github.com/pengchujin/jzsub.git
 mkdir -p ~/.codex/skills
-cp -R download-bilingual-video-skill/skills/jzsub ~/.codex/skills/
+cp -R jzsub/skills/jzsub ~/.codex/skills/
 ```
 
 然后在 Codex 中使用：
