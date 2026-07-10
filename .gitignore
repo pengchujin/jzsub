@@ -14,6 +14,9 @@ cookies.txt
 *.jpg
 *.jpeg
 *.png
+!docs/assets/**/*.jpg
+!docs/assets/**/*.jpeg
+!docs/assets/**/*.png
 download-manifest.json
 subtitle-manifest.json
 validation.json
