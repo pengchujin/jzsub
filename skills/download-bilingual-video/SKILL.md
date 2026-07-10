@@ -16,6 +16,7 @@ Download one authorized video at a time, keep an audit-safe copy of its source s
 5. Keep the highest-quality source intermediate. Re-encode only the final burned copy; avoid a second lossy transcode.
 6. Never create `cookies.txt`, print cookie values, or inspect Chrome's cookie/session stores.
 7. Translate directly with the active Codex session's default GPT model. Do not start, install, or call Ollama, MLX, llama.cpp, LM Studio, local Transformers, command-line translators, or a separate translation API unless the user explicitly requests a different engine.
+8. A successful download is not a successful bilingual job. When the download manifest declares a source subtitle, do not end the task until every translation batch is complete, rendering and validation succeed, a non-empty `*.bilingual.mp4` exists, and `verify_delivery.py` exits 0.
 
 ## Workflow
 
@@ -35,6 +36,7 @@ Run:
 python3 <skill-dir>/scripts/fetch_video.py --help
 python3 <skill-dir>/scripts/subtitle_pipeline.py --help
 python3 <skill-dir>/scripts/burn_subtitles.py --help
+python3 <skill-dir>/scripts/verify_delivery.py --help
 ```
 
 ### 2. Resolve authentication silently
@@ -91,6 +93,8 @@ Read [translation-contract.md](references/translation-contract.md) before transl
 
 Perform the translation directly in the current Codex/GPT session. Do not launch a local inference runtime, download model weights, delegate to a local model server, or call a separate translation service. Whisper is an optional speech-recognition fallback only when the user separately asks for transcription; it is not the subtitle translation engine.
 
+Treat all generated batches as an immediate continuation of the same task, not as files for a later run. Translate every `batch-*.json`, write a same-named output file for each batch, then continue directly to render, validate, and burn. Do not return a success message or stop after `prepare`, even when there are many batches.
+
 Translate natural meaning in context, not word by word. Preserve names, brands, URLs, handles, code, model numbers, explicit numerals, tone, and speaker intent. Do not copy source text into an output field, change IDs, merge cues, or silently skip a failed cue.
 
 For Simplified Chinese display text, do not use `，。`: replace an internal comma/period pause with a space and omit it at the end of a cue. The renderer applies this rule again so all generated Chinese subtitle artifacts are consistent.
@@ -133,6 +137,15 @@ Require the sibling `validation.json` (or pass `--validation-report`) and verify
 
 ### 8. Verify and report
 
+Run the completion gate before reporting:
+
+```bash
+python3 <skill-dir>/scripts/verify_delivery.py \
+  "<job-dir>/download-manifest.json"
+```
+
+Exit code 3 means the task is incomplete. Read the reported `stage` (`subtitle_prepare_required`, `translation_required`, `render_required`, or `burn_required`) and immediately continue that stage in the same task. Do not describe the download as the completed result when the manifest contains source subtitles.
+
 Require all applicable outputs before reporting success:
 
 - maximum-quality source intermediate;
@@ -152,4 +165,5 @@ Report the actual resolution, frame rate, video/audio codecs, selected subtitle 
 - If YouTube returns missing formats, subtitle 403, or PO Token errors, do not hard-code a guessed client or token. Follow the current official extractor guidance.
 - If an extractor breaks, update `yt-dlp` through its existing installation method and re-probe before changing format logic.
 - If subtitles are absent, finish successfully with video, MP4, cover, and manifest only. Do not run later subtitle stages or claim bilingual completion.
+- If `verify_delivery.py` exits 3, resume the reported stage; never turn an intermediate download or `translation-input` directory into a final answer.
 - If MP4 remux fails, keep the source intermediate and perform only the final burn transcode; do not silently reduce the source download quality.

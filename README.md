@@ -13,6 +13,7 @@
 - 默认使用 MiSans Bold、紧凑圆角背景，英文在上、中文在下
 - 自动消除滚动式自动字幕的显示时间重叠
 - 使用 libass 将双语字幕一次性烧录为 H.264/AAC MP4
+- 内置交付门槛：有源字幕时，翻译、渲染或烧录未完成都会返回未完成状态，不能把仅下载视频误报为成功
 - 静默认证：匿名失败后可直接读取 Chrome 登录态，不导出 Cookie、不打开视频页
 - 平台没有合适字幕时直接交付视频、MP4、封面和清单
 
@@ -79,6 +80,8 @@ python3 skills/download-bilingual-video/scripts/fetch_video.py --self-test
 python3 -m unittest discover \
   -s skills/download-bilingual-video/tests \
   -v
+python3 skills/download-bilingual-video/scripts/verify_delivery.py \
+  /path/to/video-job/download-manifest.json
 ```
 
 ## 安全与版权
