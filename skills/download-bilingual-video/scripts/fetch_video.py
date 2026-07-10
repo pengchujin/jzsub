@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import importlib.util
 import inspect
 import json
 import os
@@ -885,6 +886,111 @@ def _write_manifest(output_dir: Path, manifest: dict[str, Any]) -> Path:
     return destination
 
 
+def _load_subtitle_pipeline() -> Any:
+    path = Path(__file__).resolve().with_name("subtitle_pipeline.py")
+    spec = importlib.util.spec_from_file_location("download_video_subtitle_pipeline", path)
+    if spec is None or spec.loader is None:
+        raise FetchError(f"Could not load subtitle pipeline: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _advance_bilingual_stage(download_manifest: Path) -> int:
+    """Prepare captions immediately and make a subtitled fetch non-terminal."""
+    download_manifest = download_manifest.expanduser().resolve()
+    try:
+        manifest = json.loads(download_manifest.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        raise FetchError(f"Could not read download manifest: {download_manifest}") from exc
+    if not isinstance(manifest, dict):
+        raise FetchError("Download manifest root must be an object")
+    output_value = manifest.get("output_directory")
+    output_dir = (
+        Path(output_value).expanduser().resolve()
+        if isinstance(output_value, str)
+        else download_manifest.parent
+    )
+    artifacts = manifest.get("artifacts")
+    subtitle = artifacts.get("subtitle") if isinstance(artifacts, dict) else None
+    source_record = subtitle.get("source_srt") if isinstance(subtitle, dict) else None
+    source_value = source_record.get("path") if isinstance(source_record, dict) else None
+    if not isinstance(source_value, str):
+        manifest["status"] = "video_only_complete"
+        execution = manifest.setdefault("execution", {})
+        if not isinstance(execution, dict):
+            execution = manifest["execution"] = {}
+        execution.update({"complete": True, "next_stage": None})
+        _write_manifest(output_dir, manifest)
+        print(
+            json.dumps(
+                {"complete": True, "status": "video_only_complete"},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    source_srt = Path(source_value)
+    if not source_srt.is_absolute():
+        source_srt = output_dir / source_srt
+    language = subtitle.get("language")
+    kind = subtitle.get("kind")
+    if not isinstance(language, str) or not language:
+        raise FetchError("Downloaded subtitle has no language tag")
+    pipeline = _load_subtitle_pipeline()
+    try:
+        subtitle_manifest = pipeline.prepare(
+            source_srt,
+            output_dir / "subtitles",
+            language,
+            "smart" if kind == "automatic" else "preserve",
+        )
+        subtitle_data = json.loads(subtitle_manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, pipeline.PipelineError) as exc:
+        raise FetchError(f"Could not prepare source subtitles: {exc}") from exc
+    batches = subtitle_data.get("translation_batches")
+    batch_paths = [
+        batch.get("path")
+        for batch in batches
+        if isinstance(batch, dict) and isinstance(batch.get("path"), str)
+    ] if isinstance(batches, list) else []
+    if not batch_paths:
+        raise FetchError("Subtitle preparation produced no translation batches")
+
+    manifest["status"] = "bilingual_required"
+    execution = manifest.setdefault("execution", {})
+    if not isinstance(execution, dict):
+        execution = manifest["execution"] = {}
+    execution.update(
+        {
+            "complete": False,
+            "next_stage": "translation_required",
+            "subtitle_manifest": str(subtitle_manifest),
+            "translation_batch_count": len(batch_paths),
+        }
+    )
+    _write_manifest(output_dir, manifest)
+    print(
+        json.dumps(
+            {
+                "complete": False,
+                "status": "bilingual_required",
+                "next_stage": "translation_required",
+                "subtitle_manifest": str(subtitle_manifest),
+                "translation_batches": batch_paths,
+                "instruction": (
+                    "Translate every batch now with the active default GPT, write matching "
+                    "translation-output files, then render, burn, and run verify_delivery.py."
+                ),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 3
+
+
 def _require_executable(name: str, install_hint: str) -> str:
     path = shutil.which(name)
     if not path:
@@ -1182,6 +1288,42 @@ def run_self_tests() -> bool:
             info = {"extractor_key": "BiliBili", "subtitles": {}, "automatic_captions": {}}
             self.assertIsNone(select_source_subtitle(info))
             self.assertEqual(available_subtitle_summary(info), [])
+
+        def test_subtitle_download_is_nonterminal_and_prepares_translation_batches(self) -> None:
+            advance = globals().get("_advance_bilingual_stage")
+            self.assertTrue(callable(advance), "_advance_bilingual_stage is required")
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "video.source-srt.ja.srt"
+                source.write_text(
+                    "1\n00:00:00,000 --> 00:00:01,000\nこんにちは\n",
+                    encoding="utf-8",
+                )
+                manifest = {
+                    "status": "downloaded",
+                    "output_directory": str(root),
+                    "execution": {},
+                    "artifacts": {
+                        "subtitle": {
+                            "language": "ja",
+                            "kind": "automatic",
+                            "source_srt": {"path": source.name},
+                        }
+                    },
+                }
+                manifest_path = _write_manifest(root, manifest)
+
+                exit_code = advance(manifest_path)
+
+                updated = json.loads(manifest_path.read_text(encoding="utf-8"))
+                self.assertEqual(exit_code, 3)
+                self.assertEqual(updated["status"], "bilingual_required")
+                self.assertFalse(updated["execution"]["complete"])
+                self.assertEqual(updated["execution"]["next_stage"], "translation_required")
+                self.assertTrue((root / "subtitles" / "subtitle-manifest.json").is_file())
+                self.assertTrue(
+                    list((root / "subtitles" / "translation-input").glob("batch-*.json"))
+                )
 
         def test_youtube_prefers_orig_and_excludes_translations(self) -> None:
             choice = select_source_subtitle(
@@ -1495,7 +1637,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.url:
         parser.error("a video URL is required unless --self-test is used")
     try:
-        execute(args)
+        result = execute(args)
+        if result is not None and not args.probe_only:
+            return _advance_bilingual_stage(result)
     except FetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

@@ -17,6 +17,7 @@ Download one authorized video at a time, keep an audit-safe copy of its source s
 6. Never create `cookies.txt`, print cookie values, or inspect Chrome's cookie/session stores.
 7. Translate directly with the active Codex session's default GPT model. Do not start, install, or call Ollama, MLX, llama.cpp, LM Studio, local Transformers, command-line translators, or a separate translation API unless the user explicitly requests a different engine.
 8. A successful download is not a successful bilingual job. When the download manifest declares a source subtitle, do not end the task until every translation batch is complete, rendering and validation succeed, a non-empty `*.bilingual.mp4` exists, and `verify_delivery.py` exits 0.
+9. `fetch_video.py` intentionally exits 3 when it downloads a usable source subtitle. This means `bilingual_required`, not failure: it has already prepared every translation batch and the agent must immediately translate them and continue. Only exit 0 is terminal (`video_only_complete`) when no subtitle exists.
 
 ## Workflow
 
@@ -50,6 +51,8 @@ python3 <skill-dir>/scripts/fetch_video.py \
   --browser-cookies auto
 ```
 
+Read the command's final JSON. If it returns `complete:false`, `status:bilingual_required`, and exit code 3, do not report or pause. The listed `translation_batches` are the immediate next inputs for the active GPT. Translate all of them in the same turn, then render, burn, and verify. The downloader now prepares `subtitles/subtitle-manifest.json` and the translation batches automatically.
+
 For Bilibili member quality or content known to require login, use `--browser-cookies chrome` directly; this is headless and does not navigate Chrome. Use `--browser-cookies "chrome:Profile 1"` only when the user identifies another profile.
 
 Load the Chrome control skill and open the supplied page only if direct cookie access fails because the browser is signed out, the wrong profile is selected, or an interactive login/CAPTCHA is required. Use the page solely as a user handoff, then retry the same local profile. Never export cookies through the plugin or a file.
@@ -75,7 +78,7 @@ Do not use an MP4 compatibility preset as the primary source selection: it may t
 
 If the manifest has no usable foreign-language subtitle, do not invent one and do not stop the download. Treat the task as a successful video-only delivery: keep the maximum-quality intermediate, MP4 master/fallback, cover, and manifest; skip subtitle preparation, translation, ASS generation, and burn-in. Report that the platform exposed no suitable source subtitle. Offer ASR/Whisper only if the user separately asks for transcription.
 
-For a valid source SRT, run:
+For a valid source SRT, `fetch_video.py` automatically runs the equivalent of:
 
 ```bash
 python3 <skill-dir>/scripts/subtitle_pipeline.py prepare \
@@ -85,7 +88,7 @@ python3 <skill-dir>/scripts/subtitle_pipeline.py prepare \
   --segment-mode preserve
 ```
 
-Use `--segment-mode smart` only for clearly fragmented automatic captions. Smart mode may group whole cues and clamp rolling-caption display endings to the next segment start, but must retain each source cue and its original timing verbatim in the locked ledger. Never normalize spelling, punctuation, case, Unicode, or source wording. Rewrapping for display may add layout line breaks only.
+It automatically uses `smart` for automatic captions and `preserve` for manual captions. Run the command manually only when resuming a job created by an older Skill version. Smart mode may group whole cues and clamp rolling-caption display endings to the next segment start, but must retain each source cue and its original timing verbatim in the locked ledger. Never normalize spelling, punctuation, case, Unicode, or source wording. Rewrapping for display may add layout line breaks only.
 
 ### 5. Translate with the active default GPT model
 
@@ -165,5 +168,6 @@ Report the actual resolution, frame rate, video/audio codecs, selected subtitle 
 - If YouTube returns missing formats, subtitle 403, or PO Token errors, do not hard-code a guessed client or token. Follow the current official extractor guidance.
 - If an extractor breaks, update `yt-dlp` through its existing installation method and re-probe before changing format logic.
 - If subtitles are absent, finish successfully with video, MP4, cover, and manifest only. Do not run later subtitle stages or claim bilingual completion.
+- If `fetch_video.py` exits 3 with `bilingual_required`, this is the normal non-terminal path for a subtitled video. Continue from every path in `translation_batches`; do not reinterpret the exit code as a download failure or permission to stop.
 - If `verify_delivery.py` exits 3, resume the reported stage; never turn an intermediate download or `translation-input` directory into a final answer.
 - If MP4 remux fails, keep the source intermediate and perform only the final burn transcode; do not silently reduce the source download quality.
