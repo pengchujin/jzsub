@@ -1,4 +1,4 @@
 interface:
   display_name: "视频下载与双语字幕"
   short_description: "静默认证下载最高画质，有字幕时生成双语烧录视频"
-  default_prompt: "Use $download-bilingual-video to download this video at maximum quality, save its cover, and create a MiSans bilingual burned MP4 when source subtitles are available."
+  default_prompt: "Use $download-bilingual-video to download this video at maximum quality, save its cover, translate available source subtitles directly with the current default GPT model, and create a MiSans bilingual burned MP4."

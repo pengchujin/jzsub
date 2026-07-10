@@ -15,6 +15,7 @@ Download one authorized video at a time, keep an audit-safe copy of its source s
 4. Produce translations keyed by immutable segment IDs and source hashes. Fail closed on missing, extra, duplicate, empty, or hash-mismatched translations.
 5. Keep the highest-quality source intermediate. Re-encode only the final burned copy; avoid a second lossy transcode.
 6. Never create `cookies.txt`, print cookie values, or inspect Chrome's cookie/session stores.
+7. Translate directly with the active Codex session's default GPT model. Do not start, install, or call Ollama, MLX, llama.cpp, LM Studio, local Transformers, command-line translators, or a separate translation API unless the user explicitly requests a different engine.
 
 ## Workflow
 
@@ -84,9 +85,11 @@ python3 <skill-dir>/scripts/subtitle_pipeline.py prepare \
 
 Use `--segment-mode smart` only for clearly fragmented automatic captions. Smart mode may group whole cues and clamp rolling-caption display endings to the next segment start, but must retain each source cue and its original timing verbatim in the locked ledger. Never normalize spelling, punctuation, case, Unicode, or source wording. Rewrapping for display may add layout line breaks only.
 
-### 5. Translate batches into Simplified Chinese
+### 5. Translate with the active default GPT model
 
 Read [translation-contract.md](references/translation-contract.md) before translating. Read every generated file under `translation-input/` and use neighboring cues as read-only context. Create matching files under `translation-output/` containing only the accepted ID, source hash, and `zh_cn` value.
+
+Perform the translation directly in the current Codex/GPT session. Do not launch a local inference runtime, download model weights, delegate to a local model server, or call a separate translation service. Whisper is an optional speech-recognition fallback only when the user separately asks for transcription; it is not the subtitle translation engine.
 
 Translate natural meaning in context, not word by word. Preserve names, brands, URLs, handles, code, model numbers, explicit numerals, tone, and speaker intent. Do not copy source text into an output field, change IDs, merge cues, or silently skip a failed cue.
 

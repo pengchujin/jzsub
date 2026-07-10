@@ -102,6 +102,14 @@ class SubtitlePipelineTests(unittest.TestCase):
         batch = json.loads(batch_path.read_text(encoding="utf-8"))
         self.assertEqual(batch["items"][0]["source"], "  Café & co.  ")
         self.assertNotIn("source", batch["required_output"]["item_fields"])
+        self.assertEqual(
+            batch["execution_contract"],
+            {
+                "engine": "active_codex_default_gpt",
+                "external_translation_service_allowed": False,
+                "local_inference_allowed": False,
+            },
+        )
 
         translations_dir = self.write_translations(manifest)
         output_dir = self.root / "output"

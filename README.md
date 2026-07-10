@@ -8,6 +8,7 @@
 - 尽可能无损封装 MP4，避免重复有损转码
 - 下载并转换封面为 JPEG
 - 原字幕按字节锁定，翻译过程不能修改原文
+- 由当前 Codex 会话的默认 GPT 直接翻译，不启动 Ollama、MLX、llama.cpp 等本地模型
 - 生成原文、简体中文、双语 SRT 和带样式 ASS
 - 默认使用 MiSans Bold、紧凑圆角背景，英文在上、中文在下
 - 自动消除滚动式自动字幕的显示时间重叠
@@ -37,6 +38,8 @@ $download-bilingual-video https://www.youtube.com/watch?v=VIDEO_ID
 - Deno 2.3+（YouTube 完整提取能力）
 - Chrome（仅在目标内容需要现有登录态时）
 - MiSans Bold（字幕默认字体）
+
+字幕翻译不需要安装本地大模型、模型运行时或额外翻译服务；由执行 Skill 的当前 Codex 默认 GPT 直接完成。只有用户明确指定其他翻译引擎时才会改用其他方案。
 
 macOS + Homebrew 示例：
 
