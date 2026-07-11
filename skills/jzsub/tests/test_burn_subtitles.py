@@ -109,6 +109,33 @@ class BurnSubtitleValidationTests(unittest.TestCase):
 
         self.assertEqual(selected, str(full))
 
+    def test_progress_bar_is_compact_and_human_readable(self) -> None:
+        line = burn._format_progress(50, 71.5, 143.0, "0.68x")
+
+        self.assertEqual(
+            line,
+            "烧录 [██████████░░░░░░░░░░]  50%  01:11 / 02:23  0.68x",
+        )
+        self.assertLess(len(line), 80)
+
+    def test_encode_command_uses_machine_readable_quiet_progress(self) -> None:
+        command, _ = burn._encode_command(
+            "ffmpeg",
+            self.root / "input.mkv",
+            self.subtitle,
+            self.root / "output.mp4",
+            {"index": 0},
+            [],
+            force=False,
+            crf=18,
+            preset="slow",
+            encoder="libx264",
+        )
+
+        self.assertIn("-nostats", command)
+        self.assertEqual(command[command.index("-loglevel") + 1], "error")
+        self.assertEqual(command[command.index("-progress") + 1], "pipe:1")
+
     def test_rejects_output_duration_mismatch(self) -> None:
         input_video = {
             "codec_type": "video",

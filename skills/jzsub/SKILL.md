@@ -18,6 +18,7 @@ Download one authorized video at a time, keep an audit-safe copy of its source s
 7. Translate directly with the active Codex session's default GPT model. Do not start, install, or call Ollama, MLX, llama.cpp, LM Studio, local Transformers, command-line translators, or a separate translation API unless the user explicitly requests a different engine.
 8. A successful download is not a successful bilingual job. When the download manifest declares a source subtitle, do not end the task until every translation batch is complete, rendering and validation succeed, a non-empty `*.bilingual.mp4` exists, and `verify_delivery.py` exits 0.
 9. `fetch_video.py` intentionally exits 3 when it downloads a usable source subtitle. This means `bilingual_required`, not failure: it has already prepared every translation batch and the agent must immediately translate them and continue. Only exit 0 is terminal (`video_only_complete`) when no subtitle exists.
+10. Keep long stages token-efficient. Never stream or reread raw FFmpeg logs. Use the burn script's compact 5% progress milestones, check a running session no more often than every 30–60 seconds, read only new output with a small output budget, and send user updates only at meaningful stage changes.
 
 ## Workflow
 
@@ -137,6 +138,8 @@ python3 <skill-dir>/scripts/burn_subtitles.py \
 Keep the source resolution and frame rate. Use high-quality H.264/AAC-compatible MP4 defaults unless the user requests another delivery codec. Preserve the untouched source intermediate because hard burn-in necessarily re-encodes video. Warn when the input is HDR; the default compatibility output does not promise HDR preservation.
 
 Require the sibling `validation.json` (or pass `--validation-report`) and verify its recorded `bilingual.ass` checksum before encoding. Do not burn an arbitrary or stale ASS file.
+
+`burn_subtitles.py` suppresses FFmpeg's per-frame status and prints a compact progress bar at 5% milestones, for example `烧录 [██████████░░░░░░░░░░]  50%  01:11 / 02:23  0.68x`. Run it as one persistent process. Do not request the full terminal buffer, repeat completed output, or poll continuously while the percentage is unchanged.
 
 ### 8. Verify and report
 

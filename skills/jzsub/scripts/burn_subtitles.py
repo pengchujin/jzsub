@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import hashlib
 import json
 import math
@@ -17,6 +18,8 @@ from typing import Any, Sequence
 
 
 DEFAULT_ENCODER = "libx264"
+PROGRESS_BAR_WIDTH = 20
+PROGRESS_STEP_PERCENT = 5
 MP4_COPY_AUDIO_CODECS = frozenset({"aac", "ac3", "alac", "eac3", "mp3"})
 HDR_TRANSFERS = frozenset({"arib-std-b67", "smpte2084"})
 HDR_SIDE_DATA = (
@@ -150,6 +153,101 @@ def _require_libass_subtitles_filter(ffmpeg: str) -> None:
 def _last_error_line(stderr: str) -> str:
     lines = [line.strip() for line in stderr.splitlines() if line.strip()]
     return f": {lines[-1]}" if lines else ""
+
+
+def _clock(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def _format_progress(
+    percent: int,
+    encoded_seconds: float,
+    duration: float,
+    speed: str,
+) -> str:
+    percent = max(0, min(100, int(percent)))
+    filled = round(percent * PROGRESS_BAR_WIDTH / 100)
+    bar = "█" * filled + "░" * (PROGRESS_BAR_WIDTH - filled)
+    speed = speed.strip() or "--"
+    return (
+        f"烧录 [{bar}] {percent:3d}%  "
+        f"{_clock(encoded_seconds)} / {_clock(duration)}  {speed}"
+    )
+
+
+def _progress_seconds(values: dict[str, str]) -> float:
+    raw = values.get("out_time_us") or values.get("out_time_ms")
+    if raw:
+        try:
+            return max(0.0, int(raw) / 1_000_000)
+        except ValueError:
+            pass
+    clock = values.get("out_time", "")
+    try:
+        hours, minutes, seconds = clock.split(":", 2)
+        return max(0.0, int(hours) * 3600 + int(minutes) * 60 + float(seconds))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _run_ffmpeg_with_progress(command: Sequence[str], duration: float) -> tuple[int, str]:
+    process = subprocess.Popen(
+        list(command),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    if process.stdout is None:
+        process.kill()
+        raise BurnError("FFmpeg progress pipe was not available")
+
+    values: dict[str, str] = {}
+    diagnostics: deque[str] = deque(maxlen=12)
+    last_bucket = 0
+    print(_format_progress(0, 0, duration, "--"), file=sys.stderr, flush=True)
+    for raw_line in process.stdout:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "=" not in line:
+            diagnostics.append(line)
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value
+        if key != "progress":
+            continue
+
+        encoded_seconds = _progress_seconds(values)
+        raw_percent = 100 * encoded_seconds / duration if duration > 0 else 0
+        bucket = min(
+            100,
+            int(raw_percent // PROGRESS_STEP_PERCENT) * PROGRESS_STEP_PERCENT,
+        )
+        if value == "end":
+            bucket = 100
+            encoded_seconds = duration
+        if bucket > last_bucket:
+            print(
+                _format_progress(
+                    bucket,
+                    encoded_seconds,
+                    duration,
+                    values.get("speed", "--"),
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            last_bucket = bucket
+
+    return process.wait(), "\n".join(diagnostics)
 
 
 def _probe(ffprobe: str, path: Path) -> dict[str, Any]:
@@ -382,6 +480,13 @@ def _encode_command(
     command = [
         ffmpeg,
         "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-stats_period",
+        "1",
+        "-progress",
+        "pipe:1",
         "-y" if force else "-n",
         "-i",
         str(video),
@@ -547,11 +652,12 @@ def burn_subtitles(
         preset=preset,
         encoder=encoder,
     )
-    result = subprocess.run(command, check=False)
-    if result.returncode != 0:
+    returncode, diagnostic = _run_ffmpeg_with_progress(command, input_duration)
+    if returncode != 0:
         if output.is_file():
             output.unlink()
-        raise BurnError(f"FFmpeg subtitle burn failed with exit code {result.returncode}")
+        detail = _last_error_line(diagnostic)
+        raise BurnError(f"FFmpeg subtitle burn failed with exit code {returncode}{detail}")
 
     try:
         _verify_output(
