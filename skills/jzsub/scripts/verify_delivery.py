@@ -62,7 +62,7 @@ def assess_delivery(download_manifest: Path) -> dict[str, Any]:
 
     subtitle_record = artifacts.get("subtitle")
     subtitle = None
-    if isinstance(subtitle_record, dict):
+    if isinstance(subtitle_record, dict) and subtitle_record.get("dialogue") is not False:
         subtitle = _artifact_path(job_dir, subtitle_record.get("source_srt"))
     if subtitle is None:
         return {

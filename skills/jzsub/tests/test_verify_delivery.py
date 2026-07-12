@@ -65,6 +65,30 @@ class VerifyDeliveryTests(unittest.TestCase):
         self.assertEqual(result["stage"], "translation_required")
         self.assertIn("batch-0001.json", result["missing"])
 
+    def test_no_dialogue_subtitle_counts_as_video_only(self) -> None:
+        self.manifest.write_text(
+            json.dumps(
+                {
+                    "status": "video_only_complete",
+                    "output_directory": str(self.root),
+                    "artifacts": {
+                        "intermediate": {"path": self.source.name},
+                        "subtitle": {
+                            "language": "en",
+                            "dialogue": False,
+                            "source_srt": {"path": self.subtitle.name},
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = delivery.assess_delivery(self.manifest)
+
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["stage"], "video_only_complete")
+
     def test_video_only_job_requires_the_video_file_on_disk(self) -> None:
         self.manifest.write_text(
             json.dumps(

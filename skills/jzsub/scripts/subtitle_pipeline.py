@@ -22,7 +22,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 
 SCHEMA_VERSION = 1
-PIPELINE_VERSION = "1.0"
+PIPELINE_VERSION = "1.1"
 TRANSLATION_CONTRACT_VERSION = 3
 ARCHIVE_NAME = "source.original.srt"
 MANIFEST_NAME = "subtitle-manifest.json"
@@ -35,8 +35,11 @@ TRANSLATION_ENGINE = "active_codex_default_gpt"
 TRANSLATION_BATCH_SIZE = 80
 TRANSLATION_CONTEXT_SEGMENTS = 2
 ASS_WORD_JOINER = "\u2060"
+# Both languages get the same pixel budget: 68 half-width columns at font 42
+# and 62 columns (31 CJK characters) at font 46 are each about 1430 of the
+# 1760 available PlayRes pixels on 16:9 video.
 SOURCE_WRAP_COLUMNS = 68
-CHINESE_WRAP_COLUMNS = 36
+CHINESE_WRAP_COLUMNS = 62
 SOURCE_FONT_SIZE = 42
 CHINESE_FONT_SIZE = 46
 ASS_PLAY_RES_Y = 1080
@@ -47,6 +50,10 @@ DEFAULT_VIDEO_SIZE = (1920, 1080)
 
 class PipelineError(RuntimeError):
     """A user-facing validation or pipeline failure."""
+
+
+class NoDialogueError(PipelineError):
+    """The source subtitle contains only non-dialogue annotations."""
 
 
 _TIME_RE = re.compile(
@@ -181,9 +188,33 @@ def parse_srt_bytes(raw: bytes) -> list[dict[str, Any]]:
     return parsed
 
 
+# Corner brackets 「」『』 are Japanese quotation marks around real dialogue,
+# so they are deliberately not treated as annotation brackets.
+_ANNOTATION_BRACKETS = re.compile(r"[\[(【（〔][^\[\]()【】（）〔〕]*[\])】）〕]")
+_MUSIC_NOTES = re.compile(r"[♪♫♬♩🎵🎶]+")
+
+
+def is_non_dialogue_annotation(text: str) -> bool:
+    """True when an entire cue is a sound description such as [Music].
+
+    YouTube captions interleave cues like ``[Music]``, ``[Applause]``,
+    ``【音乐】``, ``（拍手）`` or bare music notes with the dialogue. Whole
+    annotation cues carry nothing to translate or display. Cues that mix an
+    annotation with dialogue are kept untouched, because displayed source text
+    must never be edited.
+    """
+
+    remainder = _MUSIC_NOTES.sub(" ", _ANNOTATION_BRACKETS.sub(" ", text))
+    if remainder == text:
+        return False
+    return not any(character.isalnum() for character in remainder)
+
+
 def _build_cue_ledger(parsed: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     cues: list[dict[str, Any]] = []
     for raw_cue in parsed:
+        if is_non_dialogue_annotation(raw_cue["text"]):
+            continue
         payload = {
             "position": raw_cue["position"],
             "original_index": raw_cue["original_index"],
@@ -522,6 +553,11 @@ def prepare(
 
     parsed = parse_srt_bytes(raw)
     cues = _build_cue_ledger(parsed)
+    if not cues:
+        raise NoDialogueError(
+            "source SRT contains only non-dialogue annotations such as [Music]; "
+            "there is nothing to translate"
+        )
     # Translation units retain every original cue. Display segmentation is
     # derived separately and is applied only after the complete translation.
     segments = _build_segments(cues, "preserve")

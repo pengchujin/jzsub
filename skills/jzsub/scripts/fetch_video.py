@@ -979,6 +979,29 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
             _video_display_size(artifacts),
         )
         subtitle_data = json.loads(subtitle_manifest.read_text(encoding="utf-8"))
+    except pipeline.NoDialogueError as exc:
+        subtitle["dialogue"] = False
+        manifest["status"] = "video_only_complete"
+        manifest.setdefault("warnings", []).append(
+            f"Subtitle track {language!r} was skipped: {exc}"
+        )
+        execution = manifest.setdefault("execution", {})
+        if not isinstance(execution, dict):
+            execution = manifest["execution"] = {}
+        execution.update({"complete": True, "next_stage": None})
+        _write_manifest(output_dir, manifest)
+        print(
+            json.dumps(
+                {
+                    "complete": True,
+                    "status": "video_only_complete",
+                    "reason": "subtitle_has_no_dialogue",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 0
     except (OSError, UnicodeError, json.JSONDecodeError, pipeline.PipelineError) as exc:
         raise FetchError(f"Could not prepare source subtitles: {exc}") from exc
     batches = subtitle_data.get("translation_batches")
@@ -1373,6 +1396,39 @@ def run_self_tests() -> bool:
                 )
                 self.assertTrue(
                     list((root / "subtitles" / "translation-input").glob("batch-*.json"))
+                )
+
+        def test_annotation_only_subtitles_complete_as_video_only(self) -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "video.source-srt.en.srt"
+                source.write_text(
+                    "1\n00:00:00,000 --> 00:00:01,000\n[Music]\n",
+                    encoding="utf-8",
+                )
+                manifest = {
+                    "status": "downloaded",
+                    "output_directory": str(root),
+                    "execution": {},
+                    "artifacts": {
+                        "subtitle": {
+                            "language": "en",
+                            "kind": "automatic",
+                            "source_srt": {"path": source.name},
+                        }
+                    },
+                }
+                manifest_path = _write_manifest(root, manifest)
+
+                exit_code = _advance_bilingual_stage(manifest_path)
+
+                updated = json.loads(manifest_path.read_text(encoding="utf-8"))
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(updated["status"], "video_only_complete")
+                self.assertIs(updated["artifacts"]["subtitle"]["dialogue"], False)
+                self.assertTrue(updated["execution"]["complete"])
+                self.assertTrue(
+                    any("no-dialogue" in item or "[Music]" in item for item in updated["warnings"])
                 )
 
         def test_unreadable_subtitle_formats_are_converted_by_ytdlp(self) -> None:

@@ -533,6 +533,67 @@ class SubtitlePipelineTests(unittest.TestCase):
         self.assertIn("中文 1 中文 2", chinese)
         pipeline.validate(manifest_path, translations_dir, output_dir)
 
+    def test_chinese_lines_use_the_full_shared_width_budget(self) -> None:
+        manifest_path, manifest = self.prepare_fixture(
+            srt([("00:00:00,000", "00:00:03,000", "A test line.")])
+        )
+        one_line = "这条二十五个汉字长度的中文字幕不应被折成两行显示"
+        self.assertEqual(len(one_line), 24)
+        translations_dir = self.write_translations(
+            manifest,
+            records=[{"id": manifest["segments"][0]["id"], "zh_cn": one_line}],
+        )
+        output_dir = self.root / "output"
+        pipeline.render(manifest_path, translations_dir, output_dir)
+        chinese_srt = output_dir.joinpath("zh-CN.srt").read_text(encoding="utf-8")
+        chinese_lines = [line for line in chinese_srt.splitlines()[2:] if line]
+        self.assertEqual(chinese_lines, [one_line])
+
+    def test_sound_annotation_cues_are_excluded_from_translation(self) -> None:
+        self.assertTrue(pipeline.is_non_dialogue_annotation("[Music]"))
+        self.assertTrue(pipeline.is_non_dialogue_annotation("[Applause] [Laughter]"))
+        self.assertTrue(pipeline.is_non_dialogue_annotation("【音乐】"))
+        self.assertTrue(pipeline.is_non_dialogue_annotation("（拍手）"))
+        self.assertTrue(pipeline.is_non_dialogue_annotation("♪♪"))
+        self.assertTrue(pipeline.is_non_dialogue_annotation("♪ [upbeat music] ♪"))
+        self.assertFalse(pipeline.is_non_dialogue_annotation("[Applause] Thank you"))
+        self.assertFalse(pipeline.is_non_dialogue_annotation("Hello (world)"))
+        self.assertFalse(pipeline.is_non_dialogue_annotation("「こんにちは」"))
+        self.assertFalse(pipeline.is_non_dialogue_annotation("Plain dialogue."))
+
+        raw = srt(
+            [
+                ("00:00:00,000", "00:00:01,000", "[Music]"),
+                ("00:00:01,100", "00:00:02,000", "Real dialogue starts."),
+                ("00:00:02,100", "00:00:03,000", "♪"),
+                ("00:00:03,100", "00:00:04,000", "[Applause] Thanks everyone."),
+            ]
+        )
+        manifest_path, manifest = self.prepare_fixture(raw, segment_mode="smart")
+        texts = [cue["text"] for cue in manifest["cues"]]
+        self.assertEqual(texts, ["Real dialogue starts.", "[Applause] Thanks everyone."])
+        self.assertEqual(len(manifest["segments"]), 2)
+
+        translations_dir = self.write_translations(manifest)
+        output_dir = self.root / "output"
+        pipeline.render(manifest_path, translations_dir, output_dir)
+        rendered = output_dir.joinpath("source.srt").read_text(encoding="utf-8")
+        self.assertNotIn("[Music]", rendered)
+        self.assertNotIn("♪", rendered)
+        pipeline.validate(manifest_path, translations_dir, output_dir)
+
+    def test_annotation_only_subtitles_raise_no_dialogue(self) -> None:
+        raw = srt(
+            [
+                ("00:00:00,000", "00:00:01,000", "[Music]"),
+                ("00:00:01,100", "00:00:02,000", "【背景音乐】"),
+            ]
+        )
+        source = self.root / "downloaded.srt"
+        source.write_bytes(raw)
+        with self.assertRaises(pipeline.NoDialogueError):
+            pipeline.prepare(source, self.root / "work", "en")
+
     def test_smart_mode_closes_groups_exactly_at_sentence_boundaries(self) -> None:
         raw = srt(
             [
