@@ -67,11 +67,11 @@ class SubtitlePipelineTests(unittest.TestCase):
         )
         return directory
 
-    def test_compact_v2_batches_omit_model_visible_hashes(self) -> None:
+    def test_compact_batches_omit_model_visible_hashes(self) -> None:
         manifest_path, manifest = self.prepare_fixture(
             srt([("00:00:00,000", "00:00:01,000", "Hello world")])
         )
-        self.assertEqual(manifest["translation_contract_version"], 2)
+        self.assertEqual(manifest["translation_contract_version"], 3)
         batch = json.loads(
             Path(manifest["translation_batches"][0]["path"]).read_text(encoding="utf-8")
         )
@@ -82,7 +82,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         translations_dir = self.write_translations(manifest)
         pipeline.render(manifest_path, translations_dir, self.root / "output")
 
-    def test_next_batch_returns_one_pending_batch_without_manifest(self) -> None:
+    def test_complete_subtitle_is_one_unified_translation_document(self) -> None:
         cues = [
             (f"00:00:{index:02d},000", f"00:00:{index:02d},900", f"Line {index}")
             for index in range(25)
@@ -91,8 +91,9 @@ class SubtitlePipelineTests(unittest.TestCase):
 
         first = pipeline.next_translation_batch(manifest_path)
         self.assertFalse(first["done"])
-        self.assertEqual(first["remaining"], 2)
-        self.assertEqual(len(first["batch"]["items"]), 24)
+        self.assertEqual(first["remaining"], 1)
+        self.assertEqual(len(first["batch"]["items"]), 25)
+        self.assertEqual(first["batch"]["context"], {"before": [], "after": []})
         self.assertNotIn("segments", first)
         self.assertNotIn("cues", first)
         self.assertNotIn("source_sha256", json.dumps(first))
@@ -108,11 +109,38 @@ class SubtitlePipelineTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        second = pipeline.next_translation_batch(manifest_path)
-        self.assertFalse(second["done"])
-        self.assertEqual(second["remaining"], 1)
-        self.assertEqual(len(second["batch"]["items"]), 1)
-        self.assertNotEqual(first["output_path"], second["output_path"])
+        complete = pipeline.next_translation_batch(manifest_path)
+        self.assertTrue(complete["done"])
+        self.assertEqual(complete["remaining"], 0)
+
+    def test_ass_uses_fixed_vertical_anchors_for_source_and_chinese(self) -> None:
+        manifest_path, manifest = self.prepare_fixture(
+            srt([
+                ("00:00:00,000", "00:00:02,000", "Short"),
+                (
+                    "00:00:02,100",
+                    "00:00:05,000",
+                    "A much longer source caption that wraps onto another display line while preserving its exact text",
+                ),
+            ])
+        )
+        translations_dir = self.write_translations(
+            manifest,
+            records=[
+                {"id": manifest["segments"][0]["id"], "zh_cn": "短句"},
+                {"id": manifest["segments"][1]["id"], "zh_cn": "这是一条会换行的较长中文字幕 用来验证位置固定"},
+            ],
+        )
+        output_dir = self.root / "output"
+        pipeline.render(manifest_path, translations_dir, output_dir)
+        rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
+
+        source_events = [line for line in rendered.splitlines() if ",Original," in line]
+        chinese_events = [line for line in rendered.splitlines() if ",Chinese," in line]
+        self.assertEqual(len(source_events), 2)
+        self.assertEqual(len(chinese_events), 2)
+        self.assertTrue(all(r"{\an2\pos(960,875)}" in line for line in source_events))
+        self.assertTrue(all(r"{\an2\pos(960,1010)}" in line for line in chinese_events))
 
     def clear_translations(self) -> None:
         directory = self.root / "translations"
@@ -374,7 +402,11 @@ class SubtitlePipelineTests(unittest.TestCase):
         self.assertIn(",3,8,0,2,80,80,70,1", rendered)
         self.assertNotIn(r"{\an7\p1}", rendered)
         self.assertIn(
-            source + r"\N{\rBackgroundChinese}日文字形宽度与拉丁文字不同",
+            r"BackgroundOriginal,,0,0,0,,{\an2\pos(960,875)}" + source,
+            rendered,
+        )
+        self.assertIn(
+            r"BackgroundChinese,,0,0,0,,{\an2\pos(960,1010)}日文字形宽度与拉丁文字不同",
             rendered,
         )
 
@@ -387,16 +419,15 @@ class SubtitlePipelineTests(unittest.TestCase):
             ]
         )
         manifest_path, manifest = self.prepare_fixture(raw, segment_mode="smart")
-        self.assertEqual(len(manifest["segments"]), 2)
+        self.assertEqual(len(manifest["segments"]), 3)
+        self.assertEqual(len(manifest["render_segments"]), 2)
         self.assertEqual(
-            manifest["segments"][0]["cue_ids"],
+            manifest["render_segments"][0]["cue_ids"],
             [manifest["cues"][0]["id"], manifest["cues"][1]["id"]],
         )
         self.assertEqual(manifest["cues"][0]["text"], "Hello")
         self.assertEqual(manifest["cues"][1]["text"], "world.")
-        covered = [
-            cue_id for segment in manifest["segments"] for cue_id in segment["cue_ids"]
-        ]
+        covered = [cue_id for segment in manifest["render_segments"] for cue_id in segment["cue_ids"]]
         self.assertEqual(covered, [cue["id"] for cue in manifest["cues"]])
 
         translations_dir = self.write_translations(manifest)
@@ -404,6 +435,8 @@ class SubtitlePipelineTests(unittest.TestCase):
         pipeline.render(manifest_path, translations_dir, output_dir)
         rendered = output_dir.joinpath("source.srt").read_text(encoding="utf-8")
         self.assertIn("Hello\nworld.", rendered)
+        chinese = output_dir.joinpath("zh-CN.srt").read_text(encoding="utf-8")
+        self.assertIn("中文 1 中文 2", chinese)
         pipeline.validate(manifest_path, translations_dir, output_dir)
 
     def test_smart_mode_clamps_rolling_caption_overlap(self) -> None:
@@ -418,9 +451,9 @@ class SubtitlePipelineTests(unittest.TestCase):
 
         self.assertEqual(len(manifest["segments"]), 3)
         self.assertEqual(manifest["cues"][0]["end_ms"], 4000)
-        self.assertEqual(manifest["segments"][0]["end_ms"], 2000)
-        self.assertEqual(manifest["segments"][1]["end_ms"], 5000)
-        for current, following in zip(manifest["segments"], manifest["segments"][1:]):
+        self.assertEqual(manifest["render_segments"][0]["end_ms"], 2000)
+        self.assertEqual(manifest["render_segments"][1]["end_ms"], 5000)
+        for current, following in zip(manifest["render_segments"], manifest["render_segments"][1:]):
             self.assertLessEqual(current["end_ms"], following["start_ms"])
 
 

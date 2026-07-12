@@ -42,7 +42,7 @@ If the platform exposes no suitable foreign-language subtitle, deliver the video
 
 ### Exit 3: bilingual work required
 
-This is expected, not a failure. Do not stop. The fetcher has already locked the source SRT and prepared compact translation batches.
+This is expected, not a failure. Do not stop. The fetcher has locked the complete source SRT and prepared one compact full-document translation request. Every original cue remains addressable; final display grouping is derived only after translation.
 
 Read [translation-contract.md](references/translation-contract.md), then request only one pending batch:
 
@@ -57,7 +57,7 @@ For `done:false`, translate `batch.items` using `batch.context` only as read-onl
 {"translations":[{"id":"unchanged-id","zh_cn":"自然简洁的中文"}]}
 ```
 
-Call `next-batch` again until `done:true`. It validates completed files and returns only the next batch; never open `subtitle-manifest.json` or enumerate all translation inputs yourself.
+Call `next-batch` again after writing the result and require `done:true`. It validates the completed file; never open `subtitle-manifest.json` yourself.
 
 Chinese subtitle house style: replace internal `，。` pauses with spaces and omit them at cue endings. Preserve names, URLs, code, numerals, tone, and meaning. Do not merge, split, reorder, annotate, or add line breaks.
 
@@ -70,7 +70,7 @@ python3 <skill-dir>/scripts/subtitle_pipeline.py render \
   --output-dir "<job-dir>/subtitles/rendered"
 ```
 
-This creates source, Chinese, bilingual SRT, and MiSans Bold ASS. The original text remains unchanged; English/source wrapping is wider; libass measures the rounded background from the exact rendered glyph layout.
+This first regroups translated cue pairs into readable timed display segments, then creates source, Chinese, bilingual SRT, and MiSans Bold ASS. The original text remains unchanged. Source and Chinese use separate fixed vertical anchors, so line-count changes cannot move the other language; libass measures each rounded background from its exact rendered glyph layout.
 
 Burn once from the best source intermediate:
 

@@ -980,8 +980,8 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
                 "subtitle_manifest": str(subtitle_manifest),
                 "translation_batch_count": len(batch_paths),
                 "instruction": (
-                    "Run subtitle_pipeline.py next-batch for one compact GPT translation "
-                    "batch at a time, then render, burn, and verify."
+                    "Run subtitle_pipeline.py next-batch for the complete ordered GPT "
+                    "translation document, then resegment, render, burn, and verify."
                 ),
             },
             ensure_ascii=False,

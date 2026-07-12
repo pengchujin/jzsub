@@ -23,7 +23,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 SCHEMA_VERSION = 1
 PIPELINE_VERSION = "1.0"
-TRANSLATION_CONTRACT_VERSION = 2
+TRANSLATION_CONTRACT_VERSION = 3
 ARCHIVE_NAME = "source.original.srt"
 MANIFEST_NAME = "subtitle-manifest.json"
 VALIDATION_NAME = "validation.json"
@@ -31,7 +31,6 @@ TRANSLATION_INPUT_DIR = "translation-input"
 TRANSLATION_OUTPUT_DIR = "translation-output"
 DEFAULT_FONT = "MiSans"
 DEFAULT_FONT_WEIGHT = 700
-TRANSLATION_BATCH_SIZE = 24
 TRANSLATION_ENGINE = "active_codex_default_gpt"
 ASS_WORD_JOINER = "\u2060"
 SOURCE_WRAP_COLUMNS = 68
@@ -449,11 +448,11 @@ def _write_translation_batches(
 
     cue_by_id = {cue["id"]: cue for cue in cues}
     batches: list[dict[str, Any]] = []
-    for batch_number, start in enumerate(range(0, len(segments), TRANSLATION_BATCH_SIZE), start=1):
-        selected = list(segments[start : start + TRANSLATION_BATCH_SIZE])
-        before = list(segments[max(0, start - 2) : start])
-        after_start = start + len(selected)
-        after = list(segments[after_start : after_start + 2])
+    # Translate the complete reconstructed subtitle document in one pass so
+    # terminology, pronouns, and sentences never lose context at batch edges.
+    for batch_number, selected in enumerate((list(segments),), start=1):
+        before: list[dict[str, Any]] = []
+        after: list[dict[str, Any]] = []
         payload = {
             "translation_contract_version": TRANSLATION_CONTRACT_VERSION,
             "source_language": source_language,
@@ -495,7 +494,10 @@ def prepare(
 
     parsed = parse_srt_bytes(raw)
     cues = _build_cue_ledger(parsed)
-    segments = _build_segments(cues, segment_mode)
+    # Translation units retain every original cue. Display segmentation is
+    # derived separately and is applied only after the complete translation.
+    segments = _build_segments(cues, "preserve")
+    render_segments = _build_segments(cues, segment_mode)
     work_dir.mkdir(parents=True, exist_ok=True)
     archive = (work_dir / ARCHIVE_NAME).resolve()
     if archive.exists():
@@ -533,6 +535,8 @@ def prepare(
         "source_ledger_sha256": _sha256_json(cues),
         "segments": segments,
         "segment_ledger_sha256": _sha256_json(segments),
+        "render_segments": render_segments,
+        "render_segment_ledger_sha256": _sha256_json(render_segments),
         "translation_batches": batches,
         "translation_output_dir": str(translation_output_dir),
     }
@@ -572,19 +576,28 @@ def validate_manifest(manifest_path: Path) -> dict[str, Any]:
         raise PipelineError("source cue ledger SHA-256 mismatch")
 
     segment_mode = manifest.get("segment_mode")
-    expected_segments = _build_segments(expected_cues, segment_mode)
+    contract_version = manifest.get("translation_contract_version", 1)
+    expected_segments = _build_segments(
+        expected_cues, "preserve" if contract_version >= 3 else segment_mode
+    )
     if manifest.get("segments") != expected_segments:
         raise PipelineError("segment ledger/provenance differs from locked source cues")
     if manifest.get("segment_ledger_sha256") != _sha256_json(expected_segments):
         raise PipelineError("segment ledger SHA-256 mismatch")
+
+    if contract_version >= 3:
+        expected_render_segments = _build_segments(expected_cues, segment_mode)
+        if manifest.get("render_segments") != expected_render_segments:
+            raise PipelineError("render segment ledger differs from locked source cues")
+        if manifest.get("render_segment_ledger_sha256") != _sha256_json(expected_render_segments):
+            raise PipelineError("render segment ledger SHA-256 mismatch")
 
     covered = [cue_id for segment in expected_segments for cue_id in segment["cue_ids"]]
     expected_order = [cue["id"] for cue in expected_cues]
     if covered != expected_order:
         raise PipelineError("segments do not cover source cues exactly once and in order")
 
-    contract_version = manifest.get("translation_contract_version", 1)
-    if contract_version not in {1, TRANSLATION_CONTRACT_VERSION}:
+    if contract_version not in {1, 2, TRANSLATION_CONTRACT_VERSION}:
         raise PipelineError("unsupported translation contract version")
     batches = manifest.get("translation_batches")
     if not isinstance(batches, list) or not batches:
@@ -618,7 +631,7 @@ def validate_manifest(manifest_path: Path) -> dict[str, Any]:
             }
             if payload.get("task") != "translate_subtitles_to_simplified_chinese" or payload.get("execution_contract") != expected_contract:
                 raise PipelineError(f"translation input contract mismatch: {path}")
-        elif payload.get("translation_contract_version") != TRANSLATION_CONTRACT_VERSION or payload.get("output_fields") != ["id", "zh_cn"]:
+        elif payload.get("translation_contract_version") != contract_version or payload.get("output_fields") != ["id", "zh_cn"]:
             raise PipelineError(f"translation input contract mismatch: {path}")
         item_ids = [item.get("id") for item in payload["items"] if isinstance(item, dict)]
         if item_ids != batch.get("segment_ids"):
@@ -831,6 +844,23 @@ def _validate_font(font: str) -> str:
     return font.strip()
 
 
+def _render_segments(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    return manifest.get("render_segments", manifest["segments"])
+
+
+def _display_translation(
+    manifest: dict[str, Any], segment: dict[str, Any], translations: dict[str, str]
+) -> str:
+    if "render_segments" not in manifest:
+        return translations[segment["id"]]
+    translation_by_cue: dict[str, str] = {}
+    for unit in manifest["segments"]:
+        if len(unit["cue_ids"]) != 1:
+            raise PipelineError("post-translation segmentation requires one cue per unit")
+        translation_by_cue[unit["cue_ids"][0]] = translations[unit["id"]]
+    return " ".join(translation_by_cue[cue_id].strip() for cue_id in segment["cue_ids"])
+
+
 def _render_ass(
     manifest: dict[str, Any], translations: dict[str, str], font: str
 ) -> str:
@@ -856,9 +886,11 @@ Style: BackgroundChinese,{font},46,&HFF000000,&HFF000000,&H78000000,&H78000000,-
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     dialogue: list[str] = []
-    for segment in manifest["segments"]:
+    for segment in _render_segments(manifest):
         source_exact = _segment_source_text(segment, cue_by_id)
-        chinese_exact = normalize_chinese_caption(translations[segment["id"]])
+        chinese_exact = normalize_chinese_caption(
+            _display_translation(manifest, segment, translations)
+        )
         source_chunks = wrap_layout_chunks(source_exact, SOURCE_WRAP_COLUMNS)
         chinese_chunks = wrap_layout_chunks(chinese_exact, CHINESE_WRAP_COLUMNS)
         source = "\n".join(source_chunks)
@@ -872,15 +904,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start = _ass_timestamp(segment["start_ms"])
         end_ms = max(segment["end_ms"], segment["start_ms"] + 10)
         end = _ass_timestamp(end_ms, end=True)
-        background_text = (
-            f"{escaped_source}"
-            f"\\N{{\\rBackgroundChinese}}{escaped_chinese}"
+        source_anchor = r"{\an2\pos(960,875)}"
+        chinese_anchor = r"{\an2\pos(960,1010)}"
+        dialogue.append(
+            f"Dialogue: 0,{start},{end},BackgroundOriginal,,0,0,0,,{source_anchor}{escaped_source}"
         )
         dialogue.append(
-            f"Dialogue: 0,{start},{end},BackgroundOriginal,,0,0,0,,{background_text}"
+            f"Dialogue: 0,{start},{end},BackgroundChinese,,0,0,0,,{chinese_anchor}{escaped_chinese}"
         )
-        text = f"{escaped_source}\\N{{\\rChinese}}{escaped_chinese}"
-        dialogue.append(f"Dialogue: 1,{start},{end},Original,,0,0,0,,{text}")
+        dialogue.append(
+            f"Dialogue: 1,{start},{end},Original,,0,0,0,,{source_anchor}{escaped_source}"
+        )
+        dialogue.append(
+            f"Dialogue: 1,{start},{end},Chinese,,0,0,0,,{chinese_anchor}{escaped_chinese}"
+        )
     return header + "\n".join(dialogue) + "\n"
 
 
@@ -891,13 +928,15 @@ def _expected_outputs(
     source_entries: list[tuple[int, int, str]] = []
     chinese_entries: list[tuple[int, int, str]] = []
     bilingual_entries: list[tuple[int, int, str]] = []
-    for segment in manifest["segments"]:
+    for segment in _render_segments(manifest):
         source_exact = _segment_source_text(segment, cue_by_id)
         source_chunks = wrap_layout_chunks(source_exact, SOURCE_WRAP_COLUMNS)
         if "".join(source_chunks) != source_exact:
             raise PipelineError(f"source wrapping changed {segment['id']}")
         source_layout = "\n".join(source_chunks)
-        chinese_exact = normalize_chinese_caption(translations[segment["id"]])
+        chinese_exact = normalize_chinese_caption(
+            _display_translation(manifest, segment, translations)
+        )
         chinese_chunks = wrap_layout_chunks(chinese_exact, CHINESE_WRAP_COLUMNS)
         if "".join(chinese_chunks) != chinese_exact:
             raise PipelineError(f"Chinese wrapping changed {segment['id']}")
