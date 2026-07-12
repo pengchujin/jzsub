@@ -57,7 +57,6 @@ class SubtitlePipelineTests(unittest.TestCase):
             records = [
                 {
                     "id": segment["id"],
-                    "source_sha256": segment["source_sha256"],
                     "zh_cn": f"中文 {index}",
                 }
                 for index, segment in enumerate(manifest["segments"], start=1)
@@ -67,6 +66,53 @@ class SubtitlePipelineTests(unittest.TestCase):
             encoding="utf-8",
         )
         return directory
+
+    def test_compact_v2_batches_omit_model_visible_hashes(self) -> None:
+        manifest_path, manifest = self.prepare_fixture(
+            srt([("00:00:00,000", "00:00:01,000", "Hello world")])
+        )
+        self.assertEqual(manifest["translation_contract_version"], 2)
+        batch = json.loads(
+            Path(manifest["translation_batches"][0]["path"]).read_text(encoding="utf-8")
+        )
+        self.assertEqual(set(batch["items"][0]), {"id", "source"})
+        self.assertNotIn("source_sha256", json.dumps(batch))
+        self.assertEqual(batch["output_fields"], ["id", "zh_cn"])
+
+        translations_dir = self.write_translations(manifest)
+        pipeline.render(manifest_path, translations_dir, self.root / "output")
+
+    def test_next_batch_returns_one_pending_batch_without_manifest(self) -> None:
+        cues = [
+            (f"00:00:{index:02d},000", f"00:00:{index:02d},900", f"Line {index}")
+            for index in range(25)
+        ]
+        manifest_path, manifest = self.prepare_fixture(srt(cues))
+
+        first = pipeline.next_translation_batch(manifest_path)
+        self.assertFalse(first["done"])
+        self.assertEqual(first["remaining"], 2)
+        self.assertEqual(len(first["batch"]["items"]), 24)
+        self.assertNotIn("segments", first)
+        self.assertNotIn("cues", first)
+        self.assertNotIn("source_sha256", json.dumps(first))
+
+        output = Path(first["output_path"])
+        output.write_text(
+            json.dumps(
+                {"translations": [
+                    {"id": item["id"], "zh_cn": "中文"}
+                    for item in first["batch"]["items"]
+                ]},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        second = pipeline.next_translation_batch(manifest_path)
+        self.assertFalse(second["done"])
+        self.assertEqual(second["remaining"], 1)
+        self.assertEqual(len(second["batch"]["items"]), 1)
+        self.assertNotEqual(first["output_path"], second["output_path"])
 
     def clear_translations(self) -> None:
         directory = self.root / "translations"
@@ -101,15 +147,8 @@ class SubtitlePipelineTests(unittest.TestCase):
         batch_path = Path(manifest["translation_batches"][0]["path"])
         batch = json.loads(batch_path.read_text(encoding="utf-8"))
         self.assertEqual(batch["items"][0]["source"], "  Café & co.  ")
-        self.assertNotIn("source", batch["required_output"]["item_fields"])
-        self.assertEqual(
-            batch["execution_contract"],
-            {
-                "engine": "active_codex_default_gpt",
-                "external_translation_service_allowed": False,
-                "local_inference_allowed": False,
-            },
-        )
+        self.assertEqual(batch["output_fields"], ["id", "zh_cn"])
+        self.assertNotIn("source", batch["output_fields"])
 
         translations_dir = self.write_translations(manifest)
         output_dir = self.root / "output"

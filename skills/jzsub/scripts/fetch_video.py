@@ -978,10 +978,10 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
                 "status": "bilingual_required",
                 "next_stage": "translation_required",
                 "subtitle_manifest": str(subtitle_manifest),
-                "translation_batches": batch_paths,
+                "translation_batch_count": len(batch_paths),
                 "instruction": (
-                    "Translate every batch now with the active default GPT, write matching "
-                    "translation-output files, then render, burn, and run verify_delivery.py."
+                    "Run subtitle_pipeline.py next-batch for one compact GPT translation "
+                    "batch at a time, then render, burn, and verify."
                 ),
             },
             ensure_ascii=False,
