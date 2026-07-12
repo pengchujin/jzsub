@@ -33,6 +33,18 @@ def _artifact_path(job_dir: Path, value: Any) -> Path | None:
     return path if path.is_absolute() else job_dir / path
 
 
+def _existing_video_artifact(job_dir: Path, artifacts: dict[str, Any]) -> Path | None:
+    records = [artifacts.get("lossless_mp4_master"), artifacts.get("intermediate")]
+    fallback = artifacts.get("lossy_mp4_fallback")
+    if isinstance(fallback, dict):
+        records.append(fallback.get("created"))
+    for record in records:
+        path = _artifact_path(job_dir, record)
+        if path is not None and path.is_file() and path.stat().st_size:
+            return path
+    return None
+
+
 def assess_delivery(download_manifest: Path) -> dict[str, Any]:
     download_manifest = download_manifest.expanduser().resolve()
     download = _read_json(download_manifest)
@@ -45,6 +57,8 @@ def assess_delivery(download_manifest: Path) -> dict[str, Any]:
     artifacts = download.get("artifacts")
     if not isinstance(artifacts, dict):
         raise DeliveryError("download manifest has no artifacts object")
+    if _existing_video_artifact(job_dir, artifacts) is None:
+        raise DeliveryError("no declared video artifact exists on disk")
 
     subtitle_record = artifacts.get("subtitle")
     subtitle = None

@@ -1,4 +1,4 @@
 interface:
   display_name: "JZSub"
-  short_description: "最高画质下载、GPT 双语字幕与自动烧录"
-  default_prompt: "Use $jzsub to download this video at maximum quality and save its cover. If subtitles exist, use next-batch to translate the complete ordered subtitle document with the current GPT, then let the renderer resegment it. Never read the full manifest. Burn fixed-position MiSans bilingual captions, show compact milestone progress, and continue until the delivery gate passes."
+  short_description: "最高画质下载、模型双语字幕与自动烧录"
+  default_prompt: "Use $jzsub to download this video at maximum quality and save its cover. If subtitles exist, use next-batch to translate every pending subtitle batch in order with the current session model, then let the renderer resegment it. Never read the full manifest. Burn bottom-stacked MiSans bilingual captions, show compact milestone progress, and continue until the delivery gate passes."

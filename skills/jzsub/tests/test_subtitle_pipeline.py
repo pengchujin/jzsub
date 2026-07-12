@@ -35,11 +35,12 @@ class SubtitlePipelineTests(unittest.TestCase):
         *,
         segment_mode: str = "preserve",
         source_language: str = "en",
+        video_size: tuple[int, int] | None = None,
     ) -> tuple[Path, dict]:
         source = self.root / "downloaded.srt"
         source.write_bytes(raw)
         manifest_path = pipeline.prepare(
-            source, self.root / "work", source_language, segment_mode
+            source, self.root / "work", source_language, segment_mode, video_size
         )
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         return manifest_path, manifest
@@ -82,7 +83,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         translations_dir = self.write_translations(manifest)
         pipeline.render(manifest_path, translations_dir, self.root / "output")
 
-    def test_complete_subtitle_is_one_unified_translation_document(self) -> None:
+    def test_short_subtitles_fit_one_translation_batch(self) -> None:
         cues = [
             (f"00:00:{index:02d},000", f"00:00:{index:02d},900", f"Line {index}")
             for index in range(25)
@@ -113,7 +114,58 @@ class SubtitlePipelineTests(unittest.TestCase):
         self.assertTrue(complete["done"])
         self.assertEqual(complete["remaining"], 0)
 
-    def test_ass_uses_fixed_vertical_anchors_for_source_and_chinese(self) -> None:
+    def test_long_subtitles_split_into_bounded_context_linked_batches(self) -> None:
+        total = pipeline.TRANSLATION_BATCH_SIZE * 2 + 5
+        cues = [
+            (
+                f"{index // 3600:02d}:{index // 60 % 60:02d}:{index % 60:02d},000",
+                f"{index // 3600:02d}:{index // 60 % 60:02d}:{index % 60:02d},900",
+                f"Line {index}",
+            )
+            for index in range(total)
+        ]
+        manifest_path, manifest = self.prepare_fixture(srt(cues))
+
+        batches = manifest["translation_batches"]
+        self.assertEqual(len(batches), 3)
+        segment_ids = [segment["id"] for segment in manifest["segments"]]
+        batched = [batch_id for batch in batches for batch_id in batch["segment_ids"]]
+        self.assertEqual(batched, segment_ids)
+
+        second = json.loads(Path(batches[1]["path"]).read_text(encoding="utf-8"))
+        size = pipeline.TRANSLATION_BATCH_SIZE
+        context_span = pipeline.TRANSLATION_CONTEXT_SEGMENTS
+        self.assertEqual(len(second["items"]), size)
+        self.assertEqual(
+            [item["id"] for item in second["context"]["before"]],
+            segment_ids[size - context_span : size],
+        )
+        self.assertEqual(
+            [item["id"] for item in second["context"]["after"]],
+            segment_ids[2 * size : 2 * size + context_span],
+        )
+
+        remaining = len(batches)
+        while True:
+            pending = pipeline.next_translation_batch(manifest_path)
+            if pending["done"]:
+                break
+            self.assertEqual(pending["remaining"], remaining)
+            Path(pending["output_path"]).write_text(
+                json.dumps(
+                    {"translations": [
+                        {"id": item["id"], "zh_cn": "中文"}
+                        for item in pending["batch"]["items"]
+                    ]},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            remaining -= 1
+        self.assertEqual(remaining, 0)
+        pipeline.load_translations(manifest, self.root / "work" / "translation-output")
+
+    def test_ass_stacks_source_above_chinese_at_the_bottom(self) -> None:
         manifest_path, manifest = self.prepare_fixture(
             srt([
                 ("00:00:00,000", "00:00:02,000", "Short"),
@@ -135,12 +187,53 @@ class SubtitlePipelineTests(unittest.TestCase):
         pipeline.render(manifest_path, translations_dir, output_dir)
         rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
 
-        source_events = [line for line in rendered.splitlines() if ",Original," in line]
-        chinese_events = [line for line in rendered.splitlines() if ",Chinese," in line]
-        self.assertEqual(len(source_events), 2)
-        self.assertEqual(len(chinese_events), 2)
-        self.assertTrue(all(r"{\an2\pos(960,875)}" in line for line in source_events))
-        self.assertTrue(all(r"{\an2\pos(960,1010)}" in line for line in chinese_events))
+        text_events = [line for line in rendered.splitlines() if ",Bilingual," in line]
+        box_events = [line for line in rendered.splitlines() if ",BilingualBox," in line]
+        self.assertEqual(len(text_events), 2)
+        self.assertEqual(len(box_events), 2)
+        # One bottom-anchored stack: source at fs42 above Chinese at fs46.
+        for line in text_events + box_events:
+            self.assertIn(r"{\an2\pos(960,1030)\fs42}", line)
+        for line in text_events:
+            self.assertIn(r"\N{\fs46\1c&H00FFFF&}", line)
+        for line in box_events:
+            self.assertIn(r"\N{\fs46}", line)
+            self.assertNotIn(r"\1c", line)
+
+    def test_portrait_video_gets_matching_playres_and_narrower_wrapping(self) -> None:
+        manifest_path, manifest = self.prepare_fixture(
+            srt([
+                (
+                    "00:00:00,000",
+                    "00:00:03,000",
+                    "A long landscape-width caption that must wrap much earlier on a portrait video",
+                )
+            ]),
+            video_size=(1080, 1920),
+        )
+        self.assertEqual(manifest["video_size"], {"width": 1080, "height": 1920})
+        translations_dir = self.write_translations(
+            manifest,
+            records=[
+                {
+                    "id": manifest["segments"][0]["id"],
+                    "zh_cn": "竖屏视频中的中文字幕必须按较窄的宽度换行",
+                }
+            ],
+        )
+        output_dir = self.root / "output"
+        pipeline.render(manifest_path, translations_dir, output_dir)
+        rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
+
+        layout = pipeline._ass_layout(manifest)
+        self.assertEqual(layout["play_res_x"], round(1080 * 1080 / 1920))
+        self.assertLess(layout["chinese_columns"], pipeline.CHINESE_WRAP_COLUMNS)
+        self.assertLess(layout["source_columns"], pipeline.SOURCE_WRAP_COLUMNS)
+        self.assertIn(f"PlayResX: {layout['play_res_x']}", rendered)
+        self.assertIn("PlayResY: 1080", rendered)
+        chinese_srt = output_dir.joinpath("zh-CN.srt").read_text(encoding="utf-8")
+        chinese_lines = [line for line in chinese_srt.splitlines()[2:] if line]
+        self.assertGreater(len(chinese_lines), 1)
 
     def clear_translations(self) -> None:
         directory = self.root / "translations"
@@ -366,11 +459,9 @@ class SubtitlePipelineTests(unittest.TestCase):
         self.assertGreater(max(map(len, source_lines)), 42)
         self.assertLessEqual(max(map(len, source_lines)), pipeline.SOURCE_WRAP_COLUMNS)
         rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
-        self.assertIn("Style: Original,MiSans,42", rendered)
-        self.assertIn("Style: Chinese,MiSans,46", rendered)
-        self.assertIn("Style: BackgroundOriginal,MiSans,42", rendered)
-        self.assertIn("Style: BackgroundChinese,MiSans,46", rendered)
-        self.assertIn(",3,8,0,2,80,80,70,1", rendered)
+        self.assertIn("Style: Bilingual,MiSans,46", rendered)
+        self.assertIn("Style: BilingualBox,MiSans,46", rendered)
+        self.assertIn(",3,8,0,2,80,80,50,1", rendered)
         self.assertIn("Dialogue: 0,", rendered)
         self.assertNotIn(r"{\an7\p1}", rendered)
         self.assertIn("Dialogue: 1,", rendered)
@@ -397,16 +488,19 @@ class SubtitlePipelineTests(unittest.TestCase):
         pipeline.render(manifest_path, translations_dir, output_dir)
         rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
 
-        self.assertIn("Style: BackgroundOriginal,MiSans,42", rendered)
-        self.assertIn("Style: BackgroundChinese,MiSans,46", rendered)
-        self.assertIn(",3,8,0,2,80,80,70,1", rendered)
+        self.assertIn("Style: BilingualBox,MiSans,46", rendered)
+        self.assertIn(",3,8,0,2,80,80,50,1", rendered)
         self.assertNotIn(r"{\an7\p1}", rendered)
         self.assertIn(
-            r"BackgroundOriginal,,0,0,0,,{\an2\pos(960,875)}" + source,
+            r"BilingualBox,,0,0,0,,{\an2\pos(960,1030)\fs42}"
+            + source
+            + r"\N{\fs46}日文字形宽度与拉丁文字不同",
             rendered,
         )
         self.assertIn(
-            r"BackgroundChinese,,0,0,0,,{\an2\pos(960,1010)}日文字形宽度与拉丁文字不同",
+            r"Bilingual,,0,0,0,,{\an2\pos(960,1030)\fs42}"
+            + source
+            + r"\N{\fs46\1c&H00FFFF&}日文字形宽度与拉丁文字不同",
             rendered,
         )
 
@@ -438,6 +532,27 @@ class SubtitlePipelineTests(unittest.TestCase):
         chinese = output_dir.joinpath("zh-CN.srt").read_text(encoding="utf-8")
         self.assertIn("中文 1 中文 2", chinese)
         pipeline.validate(manifest_path, translations_dir, output_dir)
+
+    def test_smart_mode_closes_groups_exactly_at_sentence_boundaries(self) -> None:
+        raw = srt(
+            [
+                ("00:00:00,000", "00:00:01,000", "This is the first"),
+                ("00:00:01,100", "00:00:02,000", "half of a sentence."),
+                ("00:00:02,100", "00:00:03,000", "Next sentence starts"),
+                ("00:00:03,100", "00:00:04,000", "and keeps going"),
+            ]
+        )
+        _, manifest = self.prepare_fixture(raw, segment_mode="smart")
+
+        cues = manifest["cues"]
+        groups = [segment["cue_ids"] for segment in manifest["render_segments"]]
+        self.assertEqual(
+            groups,
+            [
+                [cues[0]["id"], cues[1]["id"]],
+                [cues[2]["id"], cues[3]["id"]],
+            ],
+        )
 
     def test_smart_mode_clamps_rolling_caption_overlap(self) -> None:
         raw = srt(

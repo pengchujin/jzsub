@@ -189,7 +189,6 @@ def _looks_like_authentication_failure(error: BaseException | str) -> bool:
         "premium-only",
         "http error 401",
         "http error 403",
-        "forbidden",
     )
     return any(marker in text for marker in markers)
 
@@ -376,11 +375,20 @@ def _candidate_rows(info: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+# Formats FFmpeg can demux for the local SRT derivation. Anything else must be
+# converted to SRT by yt-dlp at download time.
+_FFMPEG_READABLE_SUBTITLE_FORMATS = frozenset({"srt", "vtt", "ass"})
+
+
 def _preferred_original_format(formats: Sequence[str]) -> str:
-    for preferred in ("srt", "vtt", "ttml", "ass", "srv3", "srv2", "srv1", "json3"):
+    for preferred in ("srt", "vtt", "ass"):
         if preferred in formats:
             return preferred
     return formats[0] if formats else "best"
+
+
+def _needs_ytdlp_subtitle_conversion(choice: SubtitleChoice) -> bool:
+    return choice.original_format not in _FFMPEG_READABLE_SUBTITLE_FORMATS
 
 
 def select_source_subtitle(
@@ -591,6 +599,8 @@ def _download_original_subtitle(
             f"subtitle:{base}.source-original.{language_label}.%(ext)s",
         ]
     )
+    if _needs_ytdlp_subtitle_conversion(choice):
+        command.extend(["--convert-subs", "srt"])
     command.append(url)
     return _run(
         command,
@@ -761,6 +771,10 @@ def _atomic_ffmpeg_output(
     )
     if result.returncode:
         temp_path.unlink(missing_ok=True)
+        if replace_existing:
+            # A stale derived MP4 from an earlier run must not outlive a failed
+            # regeneration, or it could be mistaken for a current deliverable.
+            output_path.unlink(missing_ok=True)
         details = sanitize_diagnostic(result.stderr, (str(input_path), str(temp_path)))[-1200:]
         return None, details or f"ffmpeg exited with status {result.returncode}"
     os.replace(temp_path, output_path)
@@ -896,6 +910,23 @@ def _load_subtitle_pipeline() -> Any:
     return module
 
 
+def _video_display_size(artifacts: Any) -> tuple[int, int] | None:
+    streams = artifacts.get("media_streams") if isinstance(artifacts, dict) else None
+    if not isinstance(streams, list):
+        return None
+    for stream in streams:
+        if not isinstance(stream, dict) or stream.get("codec_type") != "video":
+            continue
+        try:
+            width = int(stream.get("width"))
+            height = int(stream.get("height"))
+        except (TypeError, ValueError):
+            continue
+        if width > 0 and height > 0:
+            return width, height
+    return None
+
+
 def _advance_bilingual_stage(download_manifest: Path) -> int:
     """Prepare captions immediately and make a subtitled fetch non-terminal."""
     download_manifest = download_manifest.expanduser().resolve()
@@ -945,6 +976,7 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
             output_dir / "subtitles",
             language,
             "smart" if kind == "automatic" else "preserve",
+            _video_display_size(artifacts),
         )
         subtitle_data = json.loads(subtitle_manifest.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError, pipeline.PipelineError) as exc:
@@ -980,8 +1012,8 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
                 "subtitle_manifest": str(subtitle_manifest),
                 "translation_batch_count": len(batch_paths),
                 "instruction": (
-                    "Run subtitle_pipeline.py next-batch for the complete ordered GPT "
-                    "translation document, then resegment, render, burn, and verify."
+                    "Run subtitle_pipeline.py next-batch repeatedly, translating each "
+                    "pending batch in order until done, then render, burn, and verify."
                 ),
             },
             ensure_ascii=False,
@@ -1133,6 +1165,11 @@ def execute(args: argparse.Namespace) -> Path | None:
     original_subtitle = (
         _artifact(output_dir, original_prefix) if original_prefix else None
     )
+    if choice and _needs_ytdlp_subtitle_conversion(choice):
+        manifest["warnings"].append(
+            f"Platform subtitle format {choice.original_format!r} is not FFmpeg-readable; "
+            "yt-dlp converted it to SRT before archiving"
+        )
     if choice and original_subtitle is None:
         print(f"Preserving original subtitle track ({choice.language})…", file=sys.stderr)
         completed.append(
@@ -1283,6 +1320,9 @@ def run_self_tests() -> bool:
             )
             self.assertTrue(_looks_like_authentication_failure("HTTP Error 403: Forbidden"))
             self.assertFalse(_looks_like_authentication_failure("Temporary DNS failure"))
+            self.assertFalse(
+                _looks_like_authentication_failure("This content is forbidden in your region")
+            )
 
         def test_no_subtitle_is_a_valid_video_only_selection(self) -> None:
             info = {"extractor_key": "BiliBili", "subtitles": {}, "automatic_captions": {}}
@@ -1304,11 +1344,14 @@ def run_self_tests() -> bool:
                     "output_directory": str(root),
                     "execution": {},
                     "artifacts": {
+                        "media_streams": [
+                            {"codec_type": "video", "width": 1080, "height": 1920}
+                        ],
                         "subtitle": {
                             "language": "ja",
                             "kind": "automatic",
                             "source_srt": {"path": source.name},
-                        }
+                        },
                     },
                 }
                 manifest_path = _write_manifest(root, manifest)
@@ -1320,10 +1363,25 @@ def run_self_tests() -> bool:
                 self.assertEqual(updated["status"], "bilingual_required")
                 self.assertFalse(updated["execution"]["complete"])
                 self.assertEqual(updated["execution"]["next_stage"], "translation_required")
-                self.assertTrue((root / "subtitles" / "subtitle-manifest.json").is_file())
+                subtitle_manifest_path = root / "subtitles" / "subtitle-manifest.json"
+                self.assertTrue(subtitle_manifest_path.is_file())
+                subtitle_manifest = json.loads(
+                    subtitle_manifest_path.read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    subtitle_manifest["video_size"], {"width": 1080, "height": 1920}
+                )
                 self.assertTrue(
                     list((root / "subtitles" / "translation-input").glob("batch-*.json"))
                 )
+
+        def test_unreadable_subtitle_formats_are_converted_by_ytdlp(self) -> None:
+            json3_only = SubtitleChoice("en-orig", "automatic", "json3", ("json3",))
+            vtt = SubtitleChoice("en", "manual", "vtt", ("vtt", "json3"))
+            self.assertTrue(_needs_ytdlp_subtitle_conversion(json3_only))
+            self.assertFalse(_needs_ytdlp_subtitle_conversion(vtt))
+            self.assertEqual(_preferred_original_format(("json3", "vtt")), "vtt")
+            self.assertEqual(_preferred_original_format(("json3", "srv3")), "json3")
 
         def test_youtube_prefers_orig_and_excludes_translations(self) -> None:
             choice = select_source_subtitle(
@@ -1558,7 +1616,10 @@ def run_self_tests() -> bool:
                 )
                 self.assertIsNone(result)
                 self.assertIsNotNone(error)
-                self.assertEqual(output.read_bytes(), b"stale-master")
+                self.assertFalse(
+                    output.exists(),
+                    "a stale master must not survive a failed regeneration",
+                )
 
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(FetchVideoTests)
     result = unittest.TextTestRunner(verbosity=2).run(suite)

@@ -86,6 +86,11 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="subtitle validation JSON (default: validation.json next to the ASS file)",
     )
+    parser.add_argument(
+        "--allow-missing-font",
+        action="store_true",
+        help="continue with libass font substitution when the validated font is not installed",
+    )
     return parser
 
 
@@ -129,24 +134,10 @@ def _select_libass_ffmpeg(
 
 
 def _require_libass_subtitles_filter(ffmpeg: str) -> None:
-    result = subprocess.run(
-        [ffmpeg, "-hide_banner", "-filters"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        detail = _last_error_line(result.stderr)
-        raise BurnError(f"could not inspect FFmpeg filters{detail}")
-
-    has_subtitles = any(
-        len(fields := line.split()) >= 2 and fields[1] == "subtitles"
-        for line in result.stdout.splitlines()
-    )
-    if not has_subtitles:
+    if not _ffmpeg_has_subtitles_filter(ffmpeg):
         raise BurnError(
-            "FFmpeg has no 'subtitles' filter; install an FFmpeg build with libass support"
+            "FFmpeg has no usable 'subtitles' filter; install an FFmpeg build "
+            "with libass support"
         )
 
 
@@ -390,7 +381,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _validate_validation_report(subtitle: Path, report_path: Path) -> Path:
+def _validate_validation_report(subtitle: Path, report_path: Path) -> dict[str, Any]:
     subtitle = subtitle.expanduser().resolve()
     report_path = report_path.expanduser().resolve()
     if not report_path.is_file():
@@ -431,7 +422,84 @@ def _validate_validation_report(subtitle: Path, report_path: Path) -> Path:
         )
     if _sha256_file(subtitle) != recorded_hash.lower():
         raise BurnError("bilingual.ass SHA-256 does not match the validation report")
-    return report_path
+    return report
+
+
+_FONT_FILE_SUFFIXES = frozenset({".ttf", ".otf", ".ttc"})
+_FONT_DIRECTORIES = (
+    "~/Library/Fonts",
+    "/Library/Fonts",
+    "/System/Library/Fonts",
+    "~/.fonts",
+    "~/.local/share/fonts",
+    "/usr/share/fonts",
+    "/usr/local/share/fonts",
+)
+
+
+def _font_installed(family: str) -> bool | None:
+    """Return True/False when detection is trustworthy, None when unavailable.
+
+    libass silently substitutes another font when the requested family is
+    missing, which would pass every later gate with the wrong deliverable.
+    """
+
+    fc_list = shutil.which("fc-list")
+    if fc_list:
+        result = subprocess.run(
+            [fc_list, ":", "family"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            needle = family.casefold()
+            return any(
+                needle in entry.strip().casefold()
+                for line in result.stdout.splitlines()
+                for entry in line.split(",")
+            )
+    token = re.sub(r"[\s_-]+", "", family).casefold()
+    if not token:
+        return None
+    searched = False
+    for directory in _FONT_DIRECTORIES:
+        base = Path(directory).expanduser()
+        if not base.is_dir():
+            continue
+        searched = True
+        for path in base.rglob("*"):
+            if (
+                path.suffix.lower() in _FONT_FILE_SUFFIXES
+                and token in re.sub(r"[\s_-]+", "", path.stem).casefold()
+            ):
+                return True
+    return False if searched else None
+
+
+def _require_subtitle_font(report: dict[str, Any], *, allow_missing_font: bool) -> None:
+    font = str(report.get("font") or "").strip()
+    if not font:
+        return
+    installed = _font_installed(font)
+    if installed is True:
+        return
+    if installed is None:
+        print(
+            f"warning: could not verify that font {font!r} is installed; "
+            "libass substitutes missing fonts silently",
+            file=sys.stderr,
+        )
+        return
+    message = (
+        f"font {font!r} required by the validated subtitles was not found; install it "
+        "(MiSans: https://hyperos.mi.com/font/zh/download/)"
+    )
+    if allow_missing_font:
+        print(f"warning: {message}; continuing with libass substitution", file=sys.stderr)
+        return
+    raise BurnError(f"{message} or pass --allow-missing-font to accept substitution")
 
 
 def _audio_options(audio_streams: Sequence[dict[str, Any]]) -> tuple[list[str], list[str]]:
@@ -591,6 +659,7 @@ def burn_subtitles(
     preset: str = "slow",
     encoder: str = DEFAULT_ENCODER,
     validation_report: Path | None = None,
+    allow_missing_font: bool = False,
 ) -> list[str]:
     video = video.expanduser().resolve()
     subtitle = subtitle.expanduser().resolve()
@@ -620,7 +689,8 @@ def burn_subtitles(
     if not encoder.strip():
         raise BurnError("encoder cannot be empty")
 
-    _validate_validation_report(subtitle, report_path)
+    report = _validate_validation_report(subtitle, report_path)
+    _require_subtitle_font(report, allow_missing_font=allow_missing_font)
 
     ffmpeg, ffprobe = _required_executables()
     _require_libass_subtitles_filter(ffmpeg)
@@ -686,6 +756,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             preset=args.preset,
             encoder=args.encoder,
             validation_report=args.validation_report,
+            allow_missing_font=args.allow_missing_font,
         )
     except (BurnError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

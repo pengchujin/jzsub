@@ -48,11 +48,33 @@ class BurnSubtitleValidationTests(unittest.TestCase):
         return path
 
     def test_accepts_matching_structural_validation_report(self) -> None:
-        report = self.write_report()
+        self.write_report()
 
-        validated = burn._validate_validation_report(self.subtitle, report)
+        validated = burn._validate_validation_report(
+            self.subtitle, self.root / "validation.json"
+        )
 
-        self.assertEqual(validated, report.resolve())
+        self.assertEqual(validated["segment_count"], 2)
+        self.assertTrue(validated["structurally_valid"])
+
+    def test_missing_validated_font_fails_closed_with_override(self) -> None:
+        report = self.report(font="MiSans")
+
+        with mock.patch.object(burn, "_font_installed", return_value=False):
+            with self.assertRaisesRegex(burn.BurnError, "MiSans.*not found"):
+                burn._require_subtitle_font(report, allow_missing_font=False)
+            burn._require_subtitle_font(report, allow_missing_font=True)
+
+        with mock.patch.object(burn, "_font_installed", return_value=True):
+            burn._require_subtitle_font(report, allow_missing_font=False)
+
+        with mock.patch.object(burn, "_font_installed", return_value=None):
+            burn._require_subtitle_font(report, allow_missing_font=False)
+
+    def test_reports_without_a_font_skip_the_font_gate(self) -> None:
+        with mock.patch.object(burn, "_font_installed") as detect:
+            burn._require_subtitle_font(self.report(), allow_missing_font=False)
+        detect.assert_not_called()
 
     def test_rejects_stale_ass_checksum(self) -> None:
         report = self.write_report()

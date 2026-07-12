@@ -32,11 +32,17 @@ TRANSLATION_OUTPUT_DIR = "translation-output"
 DEFAULT_FONT = "MiSans"
 DEFAULT_FONT_WEIGHT = 700
 TRANSLATION_ENGINE = "active_codex_default_gpt"
+TRANSLATION_BATCH_SIZE = 80
+TRANSLATION_CONTEXT_SEGMENTS = 2
 ASS_WORD_JOINER = "\u2060"
 SOURCE_WRAP_COLUMNS = 68
 CHINESE_WRAP_COLUMNS = 36
-ASS_PLAY_RES_X = 1920
+SOURCE_FONT_SIZE = 42
+CHINESE_FONT_SIZE = 46
 ASS_PLAY_RES_Y = 1080
+ASS_MARGIN_X = 80
+ASS_BOTTOM_MARGIN = 50
+DEFAULT_VIDEO_SIZE = (1920, 1080)
 
 
 class PipelineError(RuntimeError):
@@ -329,35 +335,38 @@ def normalize_chinese_caption(text: str) -> str:
     return re.sub(r"\s*[，。]+\s*", " ", text).strip()
 
 
+_SENTENCE_END = re.compile(r"[.!?。！？…][\"'”’)）\]】》]*\s*$")
+
+
 def _smart_group_indices(cues: Sequence[dict[str, Any]]) -> list[list[int]]:
-    """Greedily group intact adjacent short cues; never split or rewrite one."""
+    """Group whole adjacent cues into sentence-aligned display segments.
+
+    A group always closes at end-of-sentence punctuation, so one caption never
+    spans two sentences and a sentence is split only when it exceeds the
+    duration or width budget. Cues are never split or rewritten.
+    """
 
     groups: list[list[int]] = []
     current: list[int] = []
-    strong_end = re.compile(r"[.!?。！？][\"'”’）】》]*\s*$")
     for index, cue in enumerate(cues):
-        if not current:
-            current = [index]
-            continue
-        first = cues[current[0]]
-        previous = cues[current[-1]]
-        combined_span = cue["end_ms"] - first["start_ms"]
-        gap = cue["start_ms"] - previous["end_ms"]
-        combined_text = "\n".join(cues[item]["text"] for item in [*current, index])
-        current_span = previous["end_ms"] - first["start_ms"]
-        previous_has_strong_end = bool(strong_end.search(previous["text"]))
-        can_group = (
-            -1_000 <= gap <= 750
-            and combined_span <= 6_500
-            and _display_width(combined_text.replace("\n", "")) <= 84
-            and not (previous_has_strong_end and current_span >= 1_200)
-            and (current_span < 3_200 or _display_width(combined_text) < 42)
-        )
-        if can_group:
-            current.append(index)
-        else:
-            groups.append(current)
-            current = [index]
+        if current:
+            first = cues[current[0]]
+            previous = cues[current[-1]]
+            gap = cue["start_ms"] - previous["end_ms"]
+            combined_span = cue["end_ms"] - first["start_ms"]
+            combined_text = " ".join(
+                cues[item]["text"].replace("\n", " ") for item in [*current, index]
+            )
+            joins_sentence = (
+                not _SENTENCE_END.search(previous["text"])
+                and -1_000 <= gap <= 750
+                and combined_span <= 7_000
+                and _display_width(combined_text) <= 84
+            )
+            if not joins_sentence:
+                groups.append(current)
+                current = []
+        current.append(index)
     if current:
         groups.append(current)
     return groups
@@ -448,11 +457,16 @@ def _write_translation_batches(
 
     cue_by_id = {cue["id"]: cue for cue in cues}
     batches: list[dict[str, Any]] = []
-    # Translate the complete reconstructed subtitle document in one pass so
-    # terminology, pronouns, and sentences never lose context at batch edges.
-    for batch_number, selected in enumerate((list(segments),), start=1):
-        before: list[dict[str, Any]] = []
-        after: list[dict[str, Any]] = []
+    # Bounded ordered batches keep one model pass small enough to answer
+    # completely; read-only neighbor context preserves terminology, pronouns,
+    # and sentence flow across batch edges.
+    for batch_number, start in enumerate(
+        range(0, len(segments), TRANSLATION_BATCH_SIZE), start=1
+    ):
+        selected = list(segments[start : start + TRANSLATION_BATCH_SIZE])
+        end = start + len(selected)
+        before = list(segments[max(0, start - TRANSLATION_CONTEXT_SEGMENTS) : start])
+        after = list(segments[end : end + TRANSLATION_CONTEXT_SEGMENTS])
         payload = {
             "translation_contract_version": TRANSLATION_CONTRACT_VERSION,
             "source_language": source_language,
@@ -477,14 +491,28 @@ def _write_translation_batches(
     return batches
 
 
+def _validated_video_size(video_size: tuple[int, int] | None) -> tuple[int, int]:
+    if video_size is None:
+        return DEFAULT_VIDEO_SIZE
+    try:
+        width, height = int(video_size[0]), int(video_size[1])
+    except (TypeError, ValueError, IndexError) as exc:
+        raise PipelineError("video size must be two positive integers") from exc
+    if width <= 0 or height <= 0:
+        raise PipelineError("video size must be two positive integers")
+    return width, height
+
+
 def prepare(
     source_srt: Path,
     work_dir: Path,
     source_language: str,
     segment_mode: str = "preserve",
+    video_size: tuple[int, int] | None = None,
 ) -> Path:
     source_srt = source_srt.expanduser().resolve()
     work_dir = work_dir.expanduser().resolve()
+    width, height = _validated_video_size(video_size)
     if not source_language.strip():
         raise PipelineError("--source-language cannot be empty")
     try:
@@ -524,6 +552,7 @@ def prepare(
         "source_language": source_language.strip(),
         "target_language": "zh-CN",
         "segment_mode": segment_mode,
+        "video_size": {"width": width, "height": height},
         "source": {
             "original_path": str(source_srt),
             "archive_path": str(archive),
@@ -652,11 +681,15 @@ def validate_manifest(manifest_path: Path) -> dict[str, Any]:
         after_position = positions[-1] + 1
         expected_before = [
             item_builder(segment, cue_by_id)
-            for segment in expected_segments[max(0, first_position - 2) : first_position]
+            for segment in expected_segments[
+                max(0, first_position - TRANSLATION_CONTEXT_SEGMENTS) : first_position
+            ]
         ]
         expected_after = [
             item_builder(segment, cue_by_id)
-            for segment in expected_segments[after_position : after_position + 2]
+            for segment in expected_segments[
+                after_position : after_position + TRANSLATION_CONTEXT_SEGMENTS
+            ]
         ]
         if context["before"] != expected_before or context["after"] != expected_after:
             raise PipelineError(f"translation read-only context was altered: {path}")
@@ -861,40 +894,75 @@ def _display_translation(
     return " ".join(translation_by_cue[cue_id].strip() for cue_id in segment["cue_ids"])
 
 
+def _manifest_video_size(manifest: dict[str, Any]) -> tuple[int, int]:
+    size = manifest.get("video_size")
+    if size is None:
+        return DEFAULT_VIDEO_SIZE
+    if not isinstance(size, dict):
+        raise PipelineError("manifest video_size must be an object")
+    return _validated_video_size((size.get("width"), size.get("height")))
+
+
+def _ass_layout(manifest: dict[str, Any]) -> dict[str, int]:
+    """Derive PlayRes and wrap widths from the video aspect ratio.
+
+    PlayResY is fixed and PlayResX follows the display aspect, so libass scales
+    fonts and positions isotropically on portrait and landscape video alike.
+    Wrap widths shrink with the available horizontal space and are capped at
+    the 16:9 house-style limits.
+    """
+
+    width, height = _manifest_video_size(manifest)
+    play_res_y = ASS_PLAY_RES_Y
+    play_res_x = max(320, round(play_res_y * width / height))
+    available = max(160, play_res_x - 2 * ASS_MARGIN_X)
+    return {
+        "play_res_x": play_res_x,
+        "play_res_y": play_res_y,
+        "source_columns": max(12, min(SOURCE_WRAP_COLUMNS, 2 * available // SOURCE_FONT_SIZE)),
+        "chinese_columns": max(8, min(CHINESE_WRAP_COLUMNS, 2 * available // CHINESE_FONT_SIZE)),
+        "position_x": play_res_x // 2,
+        "position_y": play_res_y - ASS_BOTTOM_MARGIN,
+    }
+
+
 def _render_ass(
     manifest: dict[str, Any], translations: dict[str, str], font: str
 ) -> str:
     font = _validate_font(font)
     cue_by_id = _cue_map(manifest)
+    layout = _ass_layout(manifest)
     header = f"""[Script Info]
 ; Generated by subtitle_pipeline.py from a SHA-256 locked source ledger.
 ; Typeface: MiSans Bold by Xiaomi. https://hyperos.mi.com/font/zh/download/
 ScriptType: v4.00+
-PlayResX: {ASS_PLAY_RES_X}
-PlayResY: {ASS_PLAY_RES_Y}
+PlayResX: {layout['play_res_x']}
+PlayResY: {layout['play_res_y']}
 WrapStyle: 2
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Original,{font},42,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,80,80,70,1
-Style: Chinese,{font},46,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,80,80,70,1
-Style: BackgroundOriginal,{font},42,&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,3,8,0,2,80,80,70,1
-Style: BackgroundChinese,{font},46,&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,3,8,0,2,80,80,70,1
+Style: Bilingual,{font},{CHINESE_FONT_SIZE},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
+Style: BilingualBox,{font},{CHINESE_FONT_SIZE},&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,3,8,0,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+    # One bottom-anchored event stacks source directly above Chinese, so the
+    # pair hugs the bottom margin and the two languages can never overlap.
+    anchor = (
+        rf"{{\an2\pos({layout['position_x']},{layout['position_y']})"
+        rf"\fs{SOURCE_FONT_SIZE}}}"
+    )
     dialogue: list[str] = []
     for segment in _render_segments(manifest):
         source_exact = _segment_source_text(segment, cue_by_id)
         chinese_exact = normalize_chinese_caption(
             _display_translation(manifest, segment, translations)
         )
-        source_chunks = wrap_layout_chunks(source_exact, SOURCE_WRAP_COLUMNS)
-        chinese_chunks = wrap_layout_chunks(chinese_exact, CHINESE_WRAP_COLUMNS)
-        source = "\n".join(source_chunks)
-        chinese = "\n".join(chinese_chunks)
+        source = "\n".join(wrap_layout_chunks(source_exact, layout["source_columns"]))
+        chinese = "\n".join(wrap_layout_chunks(chinese_exact, layout["chinese_columns"]))
         escaped_source = ass_escape(source)
         escaped_chinese = ass_escape(chinese)
         if ass_unescape_for_validation(escaped_source) != source:
@@ -904,20 +972,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start = _ass_timestamp(segment["start_ms"])
         end_ms = max(segment["end_ms"], segment["start_ms"] + 10)
         end = _ass_timestamp(end_ms, end=True)
-        source_anchor = r"{\an2\pos(960,875)}"
-        chinese_anchor = r"{\an2\pos(960,1010)}"
-        dialogue.append(
-            f"Dialogue: 0,{start},{end},BackgroundOriginal,,0,0,0,,{source_anchor}{escaped_source}"
+        box_text = (
+            f"{anchor}{escaped_source}"
+            rf"\N{{\fs{CHINESE_FONT_SIZE}}}{escaped_chinese}"
         )
-        dialogue.append(
-            f"Dialogue: 0,{start},{end},BackgroundChinese,,0,0,0,,{chinese_anchor}{escaped_chinese}"
+        text = (
+            f"{anchor}{escaped_source}"
+            rf"\N{{\fs{CHINESE_FONT_SIZE}\1c&H00FFFF&}}{escaped_chinese}"
         )
-        dialogue.append(
-            f"Dialogue: 1,{start},{end},Original,,0,0,0,,{source_anchor}{escaped_source}"
-        )
-        dialogue.append(
-            f"Dialogue: 1,{start},{end},Chinese,,0,0,0,,{chinese_anchor}{escaped_chinese}"
-        )
+        dialogue.append(f"Dialogue: 0,{start},{end},BilingualBox,,0,0,0,,{box_text}")
+        dialogue.append(f"Dialogue: 1,{start},{end},Bilingual,,0,0,0,,{text}")
     return header + "\n".join(dialogue) + "\n"
 
 
@@ -925,19 +989,20 @@ def _expected_outputs(
     manifest: dict[str, Any], translations: dict[str, str], font: str
 ) -> dict[str, bytes]:
     cue_by_id = _cue_map(manifest)
+    layout = _ass_layout(manifest)
     source_entries: list[tuple[int, int, str]] = []
     chinese_entries: list[tuple[int, int, str]] = []
     bilingual_entries: list[tuple[int, int, str]] = []
     for segment in _render_segments(manifest):
         source_exact = _segment_source_text(segment, cue_by_id)
-        source_chunks = wrap_layout_chunks(source_exact, SOURCE_WRAP_COLUMNS)
+        source_chunks = wrap_layout_chunks(source_exact, layout["source_columns"])
         if "".join(source_chunks) != source_exact:
             raise PipelineError(f"source wrapping changed {segment['id']}")
         source_layout = "\n".join(source_chunks)
         chinese_exact = normalize_chinese_caption(
             _display_translation(manifest, segment, translations)
         )
-        chinese_chunks = wrap_layout_chunks(chinese_exact, CHINESE_WRAP_COLUMNS)
+        chinese_chunks = wrap_layout_chunks(chinese_exact, layout["chinese_columns"])
         if "".join(chinese_chunks) != chinese_exact:
             raise PipelineError(f"Chinese wrapping changed {segment['id']}")
         chinese_layout = "\n".join(chinese_chunks)
@@ -1063,6 +1128,11 @@ def _parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument(
         "--segment-mode", choices=("preserve", "smart"), default="preserve"
     )
+    prepare_parser.add_argument(
+        "--video-size",
+        metavar="WIDTHxHEIGHT",
+        help="video display size used for caption layout (default: 1920x1080)",
+    )
 
     next_parser = commands.add_parser(
         "next-batch", help="print only the next pending compact translation batch"
@@ -1085,6 +1155,15 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _parse_video_size(value: str | None) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    match = re.fullmatch(r"\s*(\d+)\s*[xX×]\s*(\d+)\s*", value)
+    if not match:
+        raise PipelineError("--video-size must look like 1920x1080")
+    return int(match.group(1)), int(match.group(2))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -1094,6 +1173,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.work_dir,
                 args.source_language,
                 args.segment_mode,
+                _parse_video_size(args.video_size),
             )
             payload = {"ok": True, "manifest": str(result)}
         elif args.command == "next-batch":

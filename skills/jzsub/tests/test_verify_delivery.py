@@ -65,6 +65,29 @@ class VerifyDeliveryTests(unittest.TestCase):
         self.assertEqual(result["stage"], "translation_required")
         self.assertIn("batch-0001.json", result["missing"])
 
+    def test_video_only_job_requires_the_video_file_on_disk(self) -> None:
+        self.manifest.write_text(
+            json.dumps(
+                {
+                    "status": "downloaded",
+                    "output_directory": str(self.root),
+                    "artifacts": {
+                        "intermediate": {"path": self.source.name},
+                        "subtitle": None,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = delivery.assess_delivery(self.manifest)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["stage"], "video_only_complete")
+
+        self.source.unlink()
+        with self.assertRaisesRegex(delivery.DeliveryError, "video artifact"):
+            delivery.assess_delivery(self.manifest)
+
 
 if __name__ == "__main__":
     unittest.main()
