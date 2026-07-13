@@ -24,19 +24,17 @@
       <stop stop-color="#897cff" stop-opacity=".24"/>
       <stop offset="1" stop-color="#897cff" stop-opacity="0"/>
     </radialGradient>
-    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
-      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#4b4b89" flood-opacity=".13"/>
-    </filter>
-    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="36"/>
-    </filter>
+    <radialGradient id="mintOrb">
+      <stop stop-color="#8de3c4" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#8de3c4" stop-opacity="0"/>
+    </radialGradient>
     <clipPath id="canvas"><rect width="1280" height="440" rx="30"/></clipPath>
   </defs>
 
   <g clip-path="url(#canvas)">
     <rect width="1280" height="440" fill="url(#bg)"/>
     <circle cx="1115" cy="50" r="270" fill="url(#orb)"/>
-    <circle cx="520" cy="455" r="170" fill="#8de3c4" fill-opacity=".2" filter="url(#soft)"/>
+    <circle cx="520" cy="455" r="210" fill="url(#mintOrb)"/>
     <path d="M0 390C180 345 315 450 515 395S875 345 1280 410V440H0Z" fill="#fff" fill-opacity=".48"/>
 
     <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
@@ -72,7 +70,8 @@
         <text x="0" y="18" fill="#7b7c91" font-size="13" font-weight="750" letter-spacing="1.1">AUTOMATED DELIVERY</text>
         <path d="M0 32H618" stroke="#d7d9ea"/>
 
-        <g transform="translate(0 57)" filter="url(#shadow)">
+        <g transform="translate(0 57)">
+          <rect x="5" y="9" width="450" height="278" rx="24" fill="#6662a4" fill-opacity=".08"/>
           <rect width="450" height="278" rx="24" fill="#fff"/>
           <rect x="12" y="12" width="426" height="218" rx="17" fill="url(#video)"/>
           <circle cx="374" cy="58" r="42" fill="#fff" fill-opacity=".33"/>
@@ -92,7 +91,8 @@
           </g>
         </g>
 
-        <g transform="translate(424 82)" filter="url(#shadow)">
+        <g transform="translate(424 82)">
+          <rect x="5" y="9" width="174" height="300" rx="30" fill="#6662a4" fill-opacity=".1"/>
           <rect width="174" height="300" rx="30" fill="#fff"/>
           <rect x="9" y="9" width="156" height="282" rx="23" fill="url(#phoneVideo)"/>
           <rect x="59" y="16" width="56" height="17" rx="8.5" fill="#fff" fill-opacity=".48"/>
