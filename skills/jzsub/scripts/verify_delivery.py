@@ -45,6 +45,9 @@ def _existing_video_artifact(job_dir: Path, artifacts: dict[str, Any]) -> Path |
     return None
 
 
+DELIVERABLES = ("full", "video", "subs", "bilingual-subs")
+
+
 def assess_delivery(download_manifest: Path) -> dict[str, Any]:
     download_manifest = download_manifest.expanduser().resolve()
     download = _read_json(download_manifest)
@@ -54,25 +57,52 @@ def assess_delivery(download_manifest: Path) -> dict[str, Any]:
         if isinstance(configured_dir, str)
         else download_manifest.parent
     )
+    deliverable = download.get("deliverable")
+    if deliverable not in DELIVERABLES:
+        deliverable = "full"
     artifacts = download.get("artifacts")
     if not isinstance(artifacts, dict):
         raise DeliveryError("download manifest has no artifacts object")
-    if _existing_video_artifact(job_dir, artifacts) is None:
+    if deliverable in ("full", "video") and _existing_video_artifact(job_dir, artifacts) is None:
         raise DeliveryError("no declared video artifact exists on disk")
 
-    subtitle_record = artifacts.get("subtitle")
-    subtitle = None
-    if isinstance(subtitle_record, dict) and subtitle_record.get("dialogue") is not False:
-        subtitle = _artifact_path(job_dir, subtitle_record.get("source_srt"))
-    if subtitle is None:
+    def complete(stage: str, **extra: Any) -> dict[str, Any]:
         return {
             "complete": True,
-            "stage": "video_only_complete",
+            "stage": stage,
+            "deliverable": deliverable,
             "job_dir": str(job_dir),
             "missing": [],
+            **extra,
         }
-    if not subtitle.is_file():
+
+    subtitle_record = artifacts.get("subtitle")
+    subtitle = (
+        _artifact_path(job_dir, subtitle_record.get("source_srt"))
+        if isinstance(subtitle_record, dict)
+        else None
+    )
+    if subtitle is not None and not subtitle.is_file():
         raise DeliveryError(f"declared source subtitle is missing: {subtitle}")
+    if deliverable in ("subs", "bilingual-subs") and subtitle is None:
+        raise DeliveryError(
+            "a subtitle delivery was requested, but the manifest declares no source subtitle"
+        )
+    has_dialogue = (
+        subtitle is not None
+        and isinstance(subtitle_record, dict)
+        and subtitle_record.get("dialogue") is not False
+    )
+
+    if deliverable == "video":
+        return complete("video_complete")
+    if deliverable == "subs":
+        return complete("subs_complete")
+    if not has_dialogue:
+        # full falls back to plain video; bilingual-subs still delivered the
+        # source subtitle files even though nothing was translatable.
+        stage = "video_only_complete" if deliverable == "full" else "subs_complete"
+        return complete(stage)
 
     subtitle_dir = job_dir / "subtitles"
     subtitle_manifest_path = subtitle_dir / "subtitle-manifest.json"
@@ -119,6 +149,8 @@ def assess_delivery(download_manifest: Path) -> dict[str, Any]:
             "job_dir": str(job_dir),
             "missing": missing_rendered,
         }
+    if deliverable == "bilingual-subs":
+        return complete("bilingual_subs_complete", rendered_dir=str(rendered_dir))
 
     burned = sorted(
         path for path in job_dir.glob("*.bilingual.mp4") if path.is_file() and path.stat().st_size
@@ -130,13 +162,7 @@ def assess_delivery(download_manifest: Path) -> dict[str, Any]:
             "job_dir": str(job_dir),
             "missing": ["*.bilingual.mp4"],
         }
-    return {
-        "complete": True,
-        "stage": "bilingual_complete",
-        "job_dir": str(job_dir),
-        "burned_video": str(burned[-1]),
-        "missing": [],
-    }
+    return complete("bilingual_complete", burned_video=str(burned[-1]))
 
 
 def _parser() -> argparse.ArgumentParser:

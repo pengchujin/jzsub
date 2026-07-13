@@ -65,6 +65,103 @@ class VerifyDeliveryTests(unittest.TestCase):
         self.assertEqual(result["stage"], "translation_required")
         self.assertIn("batch-0001.json", result["missing"])
 
+    def test_video_deliverable_completes_with_untranslated_subtitle(self) -> None:
+        self.manifest.write_text(
+            json.dumps(
+                {
+                    "status": "video_complete",
+                    "deliverable": "video",
+                    "output_directory": str(self.root),
+                    "artifacts": {
+                        "intermediate": {"path": self.source.name},
+                        "subtitle": {
+                            "language": "en",
+                            "source_srt": {"path": self.subtitle.name},
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = delivery.assess_delivery(self.manifest)
+
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["stage"], "video_complete")
+
+    def test_subs_deliverable_needs_no_video_file(self) -> None:
+        self.source.unlink()
+        self.manifest.write_text(
+            json.dumps(
+                {
+                    "status": "subs_complete",
+                    "deliverable": "subs",
+                    "output_directory": str(self.root),
+                    "artifacts": {
+                        "intermediate": None,
+                        "subtitle": {
+                            "language": "en",
+                            "source_srt": {"path": self.subtitle.name},
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = delivery.assess_delivery(self.manifest)
+
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["stage"], "subs_complete")
+
+    def test_bilingual_subs_deliverable_stops_at_render(self) -> None:
+        inputs = self.root / "subtitles" / "translation-input"
+        inputs.mkdir(parents=True)
+        batch = inputs / "batch-0001.json"
+        batch.write_text("{}", encoding="utf-8")
+        outputs = self.root / "subtitles" / "translation-output"
+        outputs.mkdir()
+        (outputs / "batch-0001.json").write_text("{}", encoding="utf-8")
+        (self.root / "subtitles" / "subtitle-manifest.json").write_text(
+            json.dumps(
+                {
+                    "translation_batches": [{"path": str(batch)}],
+                    "translation_output_dir": str(outputs),
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.manifest.write_text(
+            json.dumps(
+                {
+                    "status": "bilingual_required",
+                    "deliverable": "bilingual-subs",
+                    "output_directory": str(self.root),
+                    "artifacts": {
+                        "intermediate": None,
+                        "subtitle": {
+                            "language": "en",
+                            "source_srt": {"path": self.subtitle.name},
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        pending = delivery.assess_delivery(self.manifest)
+        self.assertFalse(pending["complete"])
+        self.assertEqual(pending["stage"], "render_required")
+
+        rendered = self.root / "subtitles" / "rendered"
+        rendered.mkdir()
+        (rendered / "bilingual.ass").write_text("[Script Info]\n", encoding="utf-8")
+        (rendered / "validation.json").write_text("{}", encoding="utf-8")
+
+        result = delivery.assess_delivery(self.manifest)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["stage"], "bilingual_subs_complete")
+
     def test_no_dialogue_subtitle_counts_as_video_only(self) -> None:
         self.manifest.write_text(
             json.dumps(

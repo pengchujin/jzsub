@@ -1,6 +1,6 @@
 ---
 name: jzsub
-description: JZSub downloads maximum-quality videos, covers, and source subtitles from YouTube, Bilibili, and other yt-dlp platforms; translates foreign subtitles with the active session model; creates bilingual captions; and burns them into MP4. Use for video download, Chrome-authenticated download, bilingual subtitles, or hard-burned caption delivery.
+description: JZSub downloads maximum-quality videos, covers, and source subtitles from YouTube, Bilibili, and other yt-dlp platforms; translates foreign subtitles with the active session model; creates bilingual captions; and burns them into MP4. Use for video download, video-only or subtitle-only delivery, Chrome-authenticated download, bilingual subtitles, or hard-burned caption delivery.
 ---
 
 # JZSub
@@ -15,7 +15,7 @@ Process one authorized video per job directory and finish the whole applicable p
 4. Translate with the active session model (the agent itself). Do not call local models or separate translation APIs unless explicitly requested.
 5. Never export, print, or inspect cookie values. Cookie access must remain local and silent.
 6. Preserve the maximum-quality source. Re-encode only the final burned MP4.
-7. A subtitled job is complete only after translation, render, burn, and `verify_delivery.py` succeed.
+7. A job is complete only when `verify_delivery.py` exits 0 for its declared `--deliver` target; the default `full` target requires translation, render, and burn.
 8. Keep context small: never read the full subtitle manifest, all batches at once, or raw FFmpeg logs.
 
 ## Run
@@ -26,6 +26,15 @@ Use the Skill directory containing this file as `<skill-dir>`. Create a new empt
 python3 <skill-dir>/scripts/fetch_video.py \
   "<video-url>" --output-dir "<job-dir>" --browser-cookies auto
 ```
+
+Select the delivery target from the user's intent and pass `--deliver`:
+
+- `full` (default): the whole pipeline, ending in a hard-burned bilingual MP4.
+- `video`: video, cover, and any source subtitle files; no translation, render, or burn.
+- `subs`: only the original subtitle files, no video streams; fails when the platform has no suitable subtitle.
+- `bilingual-subs`: subtitles plus translation and rendered bilingual SRT/ASS; no video download and no burn.
+
+`video` and `subs` finish at exit 0. `full` and `bilingual-subs` continue through Exit 3; for `bilingual-subs`, finish after render and `verify_delivery.py` without burning.
 
 Authentication behavior:
 
@@ -72,7 +81,7 @@ python3 <skill-dir>/scripts/subtitle_pipeline.py render \
 
 This first regroups translated cue pairs into sentence-aligned timed display segments, then creates source, Chinese, bilingual SRT, and MiSans Bold ASS. The original text remains unchanged. Each caption is one bottom-anchored stack—source directly above Chinese—whose PlayRes and wrap widths follow the video's aspect ratio, so captions hug the bottom margin, portrait video stays proportional, and the two languages can never overlap; libass draws one translucent background panel measured from the exact rendered glyph layout, so line boxes cannot double-paint into dark bands.
 
-Burn once from the best source intermediate:
+Burn once from the best source intermediate (`full` deliverable only):
 
 ```bash
 python3 <skill-dir>/scripts/burn_subtitles.py \

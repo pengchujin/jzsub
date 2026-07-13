@@ -29,6 +29,8 @@ from typing import Any, NamedTuple, Sequence
 
 FORMAT_SELECTOR = "bv*+ba/b"
 MANIFEST_NAME = "download-manifest.json"
+DELIVERABLES = ("full", "video", "subs", "bilingual-subs")
+SUBTITLE_ONLY_DELIVERABLES = frozenset({"subs", "bilingual-subs"})
 YOUTUBE_SKIP_TRANSLATIONS = "youtube:skip=translated_subs"
 AUTO_BROWSER_COOKIES = "auto"
 _CHINESE_CODES = {"zh", "zho", "chi", "cmn", "yue", "wuu"}
@@ -848,10 +850,12 @@ def _manifest_base(
     browser_cookies: str | None,
     allow_remote_ejs: bool,
     choice: SubtitleChoice | None,
+    deliverable: str = "full",
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "deliverable": deliverable,
         "source": {
             "url": canonical_public_url(info, url),
             "extractor": info.get("extractor_key") or info.get("extractor"),
@@ -859,6 +863,10 @@ def _manifest_base(
             "title": str(info.get("title") or "untitled"),
             "duration_seconds": info.get("duration"),
             "declared_language": info.get("language") or info.get("original_language"),
+            # Probed display size lets subtitle-only jobs lay out captions
+            # without downloading the media.
+            "width": info.get("width"),
+            "height": info.get("height"),
         },
         "output_directory": str(output_dir),
         "authentication": {
@@ -910,16 +918,21 @@ def _load_subtitle_pipeline() -> Any:
     return module
 
 
-def _video_display_size(artifacts: Any) -> tuple[int, int] | None:
+def _video_display_size(manifest: dict[str, Any]) -> tuple[int, int] | None:
+    artifacts = manifest.get("artifacts")
     streams = artifacts.get("media_streams") if isinstance(artifacts, dict) else None
-    if not isinstance(streams, list):
-        return None
-    for stream in streams:
-        if not isinstance(stream, dict) or stream.get("codec_type") != "video":
-            continue
+    candidates: list[tuple[Any, Any]] = []
+    if isinstance(streams, list):
+        for stream in streams:
+            if isinstance(stream, dict) and stream.get("codec_type") == "video":
+                candidates.append((stream.get("width"), stream.get("height")))
+    source = manifest.get("source")
+    if isinstance(source, dict):
+        candidates.append((source.get("width"), source.get("height")))
+    for raw_width, raw_height in candidates:
         try:
-            width = int(stream.get("width"))
-            height = int(stream.get("height"))
+            width = int(raw_width)
+            height = int(raw_height)
         except (TypeError, ValueError):
             continue
         if width > 0 and height > 0:
@@ -942,12 +955,16 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
         if isinstance(output_value, str)
         else download_manifest.parent
     )
+    deliverable = manifest.get("deliverable")
+    if deliverable not in DELIVERABLES:
+        deliverable = "full"
     artifacts = manifest.get("artifacts")
     subtitle = artifacts.get("subtitle") if isinstance(artifacts, dict) else None
     source_record = subtitle.get("source_srt") if isinstance(subtitle, dict) else None
     source_value = source_record.get("path") if isinstance(source_record, dict) else None
-    if not isinstance(source_value, str):
-        manifest["status"] = "video_only_complete"
+
+    def finish(status: str, **extra: Any) -> int:
+        manifest["status"] = status
         execution = manifest.setdefault("execution", {})
         if not isinstance(execution, dict):
             execution = manifest["execution"] = {}
@@ -955,12 +972,21 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
         _write_manifest(output_dir, manifest)
         print(
             json.dumps(
-                {"complete": True, "status": "video_only_complete"},
+                {"complete": True, "status": status, **extra},
                 ensure_ascii=False,
                 sort_keys=True,
             )
         )
         return 0
+
+    if not isinstance(source_value, str):
+        return finish("video_only_complete")
+    if deliverable == "video":
+        # Source subtitle files were downloaded alongside the video; the
+        # translation pipeline is simply not requested.
+        return finish("video_complete")
+    if deliverable == "subs":
+        return finish("subs_complete")
 
     source_srt = Path(source_value)
     if not source_srt.is_absolute():
@@ -976,32 +1002,16 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
             output_dir / "subtitles",
             language,
             "smart" if kind == "automatic" else "preserve",
-            _video_display_size(artifacts),
+            _video_display_size(manifest),
         )
         subtitle_data = json.loads(subtitle_manifest.read_text(encoding="utf-8"))
     except pipeline.NoDialogueError as exc:
         subtitle["dialogue"] = False
-        manifest["status"] = "video_only_complete"
         manifest.setdefault("warnings", []).append(
             f"Subtitle track {language!r} was skipped: {exc}"
         )
-        execution = manifest.setdefault("execution", {})
-        if not isinstance(execution, dict):
-            execution = manifest["execution"] = {}
-        execution.update({"complete": True, "next_stage": None})
-        _write_manifest(output_dir, manifest)
-        print(
-            json.dumps(
-                {
-                    "complete": True,
-                    "status": "video_only_complete",
-                    "reason": "subtitle_has_no_dialogue",
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-        )
-        return 0
+        status = "video_only_complete" if deliverable == "full" else "subs_complete"
+        return finish(status, reason="subtitle_has_no_dialogue")
     except (OSError, UnicodeError, json.JSONDecodeError, pipeline.PipelineError) as exc:
         raise FetchError(f"Could not prepare source subtitles: {exc}") from exc
     batches = subtitle_data.get("translation_batches")
@@ -1031,12 +1041,14 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
             {
                 "complete": False,
                 "status": "bilingual_required",
+                "deliverable": deliverable,
                 "next_stage": "translation_required",
                 "subtitle_manifest": str(subtitle_manifest),
                 "translation_batch_count": len(batch_paths),
                 "instruction": (
                     "Run subtitle_pipeline.py next-batch repeatedly, translating each "
-                    "pending batch in order until done, then render, burn, and verify."
+                    "pending batch in order until done, then render and verify; "
+                    "burn only for the full deliverable."
                 ),
             },
             ensure_ascii=False,
@@ -1075,6 +1087,7 @@ def _dry_run_plan(args: argparse.Namespace) -> dict[str, Any]:
         "status": "dry-run",
         "network_accessed": False,
         "files_written": False,
+        "deliverable": getattr(args, "deliver", "full"),
         "source": display_url(args.url),
         "output_directory": str(Path(args.output_dir).expanduser()),
         "browser_cookies_configured": bool(args.browser_cookies),
@@ -1131,7 +1144,14 @@ def execute(args: argparse.Namespace) -> Path | None:
         info = probe_video(
             url, effective_browser_cookies, args.allow_remote_ejs, yt_dlp
         )
+    deliverable = getattr(args, "deliver", "full")
+    subtitles_only = deliverable in SUBTITLE_ONLY_DELIVERABLES
     choice = select_source_subtitle(info, args.source_lang)
+    if subtitles_only and choice is None:
+        raise FetchError(
+            "A subtitle-only delivery was requested, but the platform advertises "
+            "no suitable non-Chinese source subtitle"
+        )
     manifest = _manifest_base(
         info=info,
         url=url,
@@ -1139,6 +1159,7 @@ def execute(args: argparse.Namespace) -> Path | None:
         browser_cookies=effective_browser_cookies,
         allow_remote_ejs=args.allow_remote_ejs,
         choice=choice,
+        deliverable=deliverable,
     )
     manifest["execution"] = {"resume": bool(args.resume)}
     manifest["authentication"]["mode"] = authentication_mode
@@ -1169,17 +1190,18 @@ def execute(args: argparse.Namespace) -> Path | None:
 
     base = safe_stem(info.get("title"), info.get("id"))
     completed: list[subprocess.CompletedProcess[str]] = []
-    print("Downloading highest-quality streams and cover…", file=sys.stderr)
-    completed.append(
-        _download_video_and_cover(
-            url=url,
-            output_dir=output_dir,
-            base=base,
-            browser_cookies=effective_browser_cookies,
-            allow_remote_ejs=args.allow_remote_ejs,
-            executable=yt_dlp,
+    if not subtitles_only:
+        print("Downloading highest-quality streams and cover…", file=sys.stderr)
+        completed.append(
+            _download_video_and_cover(
+                url=url,
+                output_dir=output_dir,
+                base=base,
+                browser_cookies=effective_browser_cookies,
+                allow_remote_ejs=args.allow_remote_ejs,
+                executable=yt_dlp,
+            )
         )
-    )
 
     language_label = _subtitle_language_label(choice.language) if choice else None
     original_prefix = (
@@ -1208,10 +1230,17 @@ def execute(args: argparse.Namespace) -> Path | None:
         )
         original_subtitle = _artifact(output_dir, original_prefix)
 
-    intermediate = _artifact(output_dir, f"{base}.intermediate.")
-    if intermediate is None:
-        raise FetchError("yt-dlp completed but no intermediate video file was found")
-    cover = _artifact(output_dir, f"{base}.cover.", ".jpg")
+    intermediate: Path | None = None
+    cover: Path | None = None
+    media_probe: dict[str, Any] = {}
+    master: Path | None = None
+    fallback: Path | None = None
+    fallback_error: str | None = None
+    if not subtitles_only:
+        intermediate = _artifact(output_dir, f"{base}.intermediate.")
+        if intermediate is None:
+            raise FetchError("yt-dlp completed but no intermediate video file was found")
+        cover = _artifact(output_dir, f"{base}.cover.", ".jpg")
     if choice and original_subtitle is None:
         raise FetchError("The selected original subtitle track was not written to disk")
     source_srt: Path | None = None
@@ -1224,39 +1253,40 @@ def execute(args: argparse.Namespace) -> Path | None:
             ffmpeg=ffmpeg,
             replace_existing=args.resume,
         )
-    if cover is None:
-        manifest["warnings"].append("The platform did not yield a JPG cover")
 
-    media_probe = _ffprobe(intermediate, ffprobe)
-    if not any(
-        stream.get("codec_type") == "video"
-        for stream in media_probe.get("streams", [])
-        if isinstance(stream, dict)
-    ):
-        raise FetchError("The intermediate failed verification: no video stream was found")
-    master_path = output_dir / f"{base}.master.mp4"
-    print("Trying lossless MP4 remux…", file=sys.stderr)
-    master, remux_error = _try_lossless_mp4(
-        intermediate,
-        master_path,
-        ffmpeg,
-        replace_existing=args.resume,
-    )
-    if remux_error:
-        manifest["warnings"].append(f"Lossless MP4 remux unavailable: {remux_error}")
+    if not subtitles_only:
+        assert intermediate is not None
+        if cover is None:
+            manifest["warnings"].append("The platform did not yield a JPG cover")
 
-    fallback: Path | None = None
-    fallback_error: str | None = None
-    if master is None and args.mp4_fallback:
-        print("Lossless remux was unavailable; creating requested high-quality MP4 fallback…", file=sys.stderr)
-        fallback, fallback_error = _create_fallback_mp4(
+        media_probe = _ffprobe(intermediate, ffprobe)
+        if not any(
+            stream.get("codec_type") == "video"
+            for stream in media_probe.get("streams", [])
+            if isinstance(stream, dict)
+        ):
+            raise FetchError("The intermediate failed verification: no video stream was found")
+        master_path = output_dir / f"{base}.master.mp4"
+        print("Trying lossless MP4 remux…", file=sys.stderr)
+        master, remux_error = _try_lossless_mp4(
             intermediate,
-            output_dir / f"{base}.fallback.mp4",
+            master_path,
             ffmpeg,
             replace_existing=args.resume,
         )
-        if fallback_error:
-            raise FetchError(f"Requested MP4 fallback failed: {fallback_error}")
+        if remux_error:
+            manifest["warnings"].append(f"Lossless MP4 remux unavailable: {remux_error}")
+
+        if master is None and args.mp4_fallback:
+            print("Lossless remux was unavailable; creating requested high-quality MP4 fallback…", file=sys.stderr)
+            fallback, fallback_error = _create_fallback_mp4(
+                intermediate,
+                output_dir / f"{base}.fallback.mp4",
+                ffmpeg,
+                replace_existing=args.resume,
+            )
+            if fallback_error:
+                raise FetchError(f"Requested MP4 fallback failed: {fallback_error}")
 
     original_subtitle_record = _file_record(
         original_subtitle, output_dir, checksum=True
@@ -1397,6 +1427,78 @@ def run_self_tests() -> bool:
                 self.assertTrue(
                     list((root / "subtitles" / "translation-input").glob("batch-*.json"))
                 )
+
+        def test_deliver_flag_defaults_to_full_and_reaches_dry_run(self) -> None:
+            parser = build_parser()
+            parsed = parser.parse_args(["--dry-run", "https://example.invalid/video"])
+            self.assertEqual(parsed.deliver, "full")
+            self.assertEqual(_dry_run_plan(parsed)["deliverable"], "full")
+            parsed = parser.parse_args(
+                ["--deliver", "subs", "--dry-run", "https://example.invalid/video"]
+            )
+            self.assertEqual(_dry_run_plan(parsed)["deliverable"], "subs")
+
+        def test_video_and_subs_deliverables_finish_without_translation(self) -> None:
+            for deliverable, status in (("video", "video_complete"), ("subs", "subs_complete")):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / "video.source-srt.ja.srt"
+                    source.write_text(
+                        "1\n00:00:00,000 --> 00:00:01,000\nこんにちは\n",
+                        encoding="utf-8",
+                    )
+                    manifest = {
+                        "status": "downloaded",
+                        "deliverable": deliverable,
+                        "output_directory": str(root),
+                        "execution": {},
+                        "artifacts": {
+                            "subtitle": {
+                                "language": "ja",
+                                "kind": "automatic",
+                                "source_srt": {"path": source.name},
+                            }
+                        },
+                    }
+                    manifest_path = _write_manifest(root, manifest)
+
+                    exit_code = _advance_bilingual_stage(manifest_path)
+
+                    updated = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    self.assertEqual(exit_code, 0, deliverable)
+                    self.assertEqual(updated["status"], status)
+                    self.assertTrue(updated["execution"]["complete"])
+                    self.assertFalse((root / "subtitles").exists())
+
+        def test_bilingual_subs_deliverable_still_requires_translation(self) -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "video.source-srt.ja.srt"
+                source.write_text(
+                    "1\n00:00:00,000 --> 00:00:01,000\nこんにちは\n",
+                    encoding="utf-8",
+                )
+                manifest = {
+                    "status": "downloaded",
+                    "deliverable": "bilingual-subs",
+                    "output_directory": str(root),
+                    "execution": {},
+                    "artifacts": {
+                        "subtitle": {
+                            "language": "ja",
+                            "kind": "automatic",
+                            "source_srt": {"path": source.name},
+                        }
+                    },
+                }
+                manifest_path = _write_manifest(root, manifest)
+
+                exit_code = _advance_bilingual_stage(manifest_path)
+
+                updated = json.loads(manifest_path.read_text(encoding="utf-8"))
+                self.assertEqual(exit_code, 3)
+                self.assertEqual(updated["status"], "bilingual_required")
+                self.assertTrue((root / "subtitles" / "subtitle-manifest.json").is_file())
 
         def test_annotation_only_subtitles_complete_as_video_only(self) -> None:
             with tempfile.TemporaryDirectory() as directory:
@@ -1706,6 +1808,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--source-lang",
         help="Override original subtitle language selection, e.g. en, en-orig, ja, or ko",
+    )
+    parser.add_argument(
+        "--deliver",
+        choices=DELIVERABLES,
+        default="full",
+        help=(
+            "Delivery target: 'full' burns bilingual captions into MP4 (default); "
+            "'video' downloads video, cover, and source subtitle files without the "
+            "translation pipeline; 'subs' downloads only the source subtitle files; "
+            "'bilingual-subs' also translates and renders SRT/ASS without video or burn"
+        ),
     )
     parser.add_argument(
         "--allow-remote-ejs",
