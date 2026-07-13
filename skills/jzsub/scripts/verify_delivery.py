@@ -152,17 +152,36 @@ def assess_delivery(download_manifest: Path) -> dict[str, Any]:
     if deliverable == "bilingual-subs":
         return complete("bilingual_subs_complete", rendered_dir=str(rendered_dir))
 
-    burned = sorted(
-        path for path in job_dir.glob("*.bilingual.mp4") if path.is_file() and path.stat().st_size
+    delivery_names = download.get("delivery_names")
+    burned_name = (
+        delivery_names.get("bilingual_video")
+        if isinstance(delivery_names, dict)
+        else None
     )
-    if not burned:
+    if isinstance(burned_name, str) and burned_name:
+        if Path(burned_name).name != burned_name:
+            raise DeliveryError("delivery_names.bilingual_video must be a plain filename")
+        burned = job_dir / burned_name
+        if burned.is_file() and burned.stat().st_size:
+            return complete("bilingual_complete", burned_video=str(burned))
+        missing = [str(burned)]
+    else:
+        legacy = sorted(
+            path
+            for path in job_dir.glob("*.bilingual.mp4")
+            if path.is_file() and path.stat().st_size
+        )
+        if legacy:
+            return complete("bilingual_complete", burned_video=str(legacy[-1]))
+        missing = ["*.bilingual.mp4"]
+    if missing:
         return {
             "complete": False,
             "stage": "burn_required",
             "job_dir": str(job_dir),
-            "missing": ["*.bilingual.mp4"],
+            "missing": missing,
         }
-    return complete("bilingual_complete", burned_video=str(burned[-1]))
+    raise AssertionError("unreachable")
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -111,6 +111,34 @@ def safe_stem(title: Any, video_id: Any, max_bytes: int = 180) -> str:
     return f"{clean_title}{suffix}"
 
 
+def delivery_names(title: Any, target_language: str) -> dict[str, str]:
+    """Return user-facing artifact names localized for the delivery language."""
+
+    clean_title = unicodedata.normalize("NFKC", str(title or "untitled"))
+    clean_title = _UNSAFE_FILENAME.sub("_", clean_title)
+    clean_title = re.sub(r"\s+", " ", clean_title)
+    clean_title = re.sub(r"_+", "_", clean_title).strip(" ._") or "untitled"
+    if clean_title.upper() in _WINDOWS_RESERVED:
+        clean_title = f"_{clean_title}"
+    language = _language_base(target_language)
+    if language in {"zh", "zho", "chi", "cmn", "yue", "wuu"}:
+        cover = "封面.jpg"
+        prefix = "双语字幕版"
+    elif language in {"ja", "jpn"}:
+        cover = "カバー.jpg"
+        prefix = "二言語字幕版"
+    else:
+        cover = "cover.jpg"
+        prefix = "Bilingual Subtitled"
+    suffix = "」.mp4"
+    budget = 240 - len(f"{prefix}「{suffix}".encode("utf-8"))
+    clean_title = _truncate_utf8(clean_title, max(1, budget)).rstrip(" ._") or "untitled"
+    return {
+        "cover": cover,
+        "bilingual_video": f"{prefix}「{clean_title}」.mp4",
+    }
+
+
 def validate_url(url: str) -> str:
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -570,16 +598,25 @@ def available_subtitle_summary(
     ]
 
 
+def download_output_templates(base: str, cover_name: str) -> tuple[str, str]:
+    return (
+        f"{base}.intermediate.%(ext)s",
+        f"thumbnail:{Path(cover_name).stem}.%(ext)s",
+    )
+
+
 def _download_video_and_cover(
     *,
     url: str,
     output_dir: Path,
     base: str,
+    cover_name: str,
     browser_cookies: str | None,
     allow_remote_ejs: bool,
     executable: str,
 ) -> subprocess.CompletedProcess[str]:
     command = ytdlp_common_args(browser_cookies, allow_remote_ejs, executable)
+    video_template, cover_template = download_output_templates(base, cover_name)
     command.extend(
         [
             "-P",
@@ -596,9 +633,9 @@ def _download_video_and_cover(
             "--no-overwrites",
             "--no-post-overwrites",
             "-o",
-            f"{base}.intermediate.%(ext)s",
+            video_template,
             "-o",
-            f"thumbnail:{base}.cover.%(ext)s",
+            cover_template,
             url,
         ]
     )
@@ -899,6 +936,7 @@ def _manifest_base(
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "deliverable": deliverable,
         "target_language": target_language,
+        "delivery_names": delivery_names(info.get("title"), target_language),
         "source": {
             "url": canonical_public_url(info, url),
             "extractor": info.get("extractor_key") or info.get("extractor"),
@@ -1041,6 +1079,12 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
     target_language = manifest.get("target_language")
     if not isinstance(target_language, str) or not target_language.strip():
         target_language = DEFAULT_TARGET_LANGUAGE
+    names = manifest.get("delivery_names")
+    if not isinstance(names, dict) or not isinstance(names.get("bilingual_video"), str):
+        source = manifest.get("source")
+        title = source.get("title") if isinstance(source, dict) else "untitled"
+        names = delivery_names(title, target_language)
+        manifest["delivery_names"] = names
     pipeline = _load_subtitle_pipeline()
     try:
         subtitle_manifest = pipeline.prepare(
@@ -1092,6 +1136,11 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
                 "next_stage": "translation_required",
                 "subtitle_manifest": str(subtitle_manifest),
                 "translation_batch_count": len(batch_paths),
+                "burn_output": (
+                    str(output_dir / names["bilingual_video"])
+                    if deliverable == "full"
+                    else None
+                ),
                 "instruction": (
                     "Run subtitle_pipeline.py next-batch repeatedly, translating each "
                     "pending batch in order until done, then render and verify; "
@@ -1240,6 +1289,7 @@ def execute(args: argparse.Namespace) -> Path | None:
             )
 
     base = safe_stem(info.get("title"), info.get("id"))
+    names = manifest["delivery_names"]
     completed: list[subprocess.CompletedProcess[str]] = []
     if not subtitles_only:
         print("Downloading highest-quality streams and cover…", file=sys.stderr)
@@ -1248,6 +1298,7 @@ def execute(args: argparse.Namespace) -> Path | None:
                 url=url,
                 output_dir=output_dir,
                 base=base,
+                cover_name=names["cover"],
                 browser_cookies=effective_browser_cookies,
                 allow_remote_ejs=args.allow_remote_ejs,
                 executable=yt_dlp,
@@ -1291,7 +1342,8 @@ def execute(args: argparse.Namespace) -> Path | None:
         intermediate = _artifact(output_dir, f"{base}.intermediate.")
         if intermediate is None:
             raise FetchError("yt-dlp completed but no intermediate video file was found")
-        cover = _artifact(output_dir, f"{base}.cover.", ".jpg")
+        cover_path = output_dir / names["cover"]
+        cover = cover_path if cover_path.is_file() else None
     if choice and original_subtitle is None:
         raise FetchError("The selected original subtitle track was not written to disk")
     source_srt: Path | None = None
@@ -1392,6 +1444,27 @@ def execute(args: argparse.Namespace) -> Path | None:
 
 def run_self_tests() -> bool:
     class FetchVideoTests(unittest.TestCase):
+        def test_delivery_names_follow_target_language(self) -> None:
+            names = delivery_names("Parking / Sensor", "zh-CN")
+            self.assertEqual(names["cover"], "封面.jpg")
+            self.assertEqual(
+                names["bilingual_video"],
+                "双语字幕版「Parking _ Sensor」.mp4",
+            )
+
+        def test_delivery_names_use_japanese_for_japanese_target(self) -> None:
+            names = delivery_names("Parking Sensor", "ja")
+            self.assertEqual(names["cover"], "カバー.jpg")
+            self.assertEqual(
+                names["bilingual_video"],
+                "二言語字幕版「Parking Sensor」.mp4",
+            )
+
+        def test_download_templates_use_localized_cover_name(self) -> None:
+            video, cover = download_output_templates("Parking [id]", "封面.jpg")
+            self.assertEqual(video, "Parking [id].intermediate.%(ext)s")
+            self.assertEqual(cover, "thumbnail:封面.%(ext)s")
+
         def test_safe_stem_blocks_traversal_and_keeps_id(self) -> None:
             self.assertEqual(safe_stem("../bad/name", "id"), "bad_name [id]")
 

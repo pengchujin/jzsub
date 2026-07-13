@@ -86,9 +86,9 @@
           </g>
           <g transform="translate(22 245)" font-size="13" font-weight="680">
             <circle cx="7" cy="7" r="7" fill="#7a6ef7"/>
-            <text x="21" y="12" fill="#55566d">video.bilingual.mp4</text>
+            <text x="21" y="12" fill="#55566d">双语字幕版「视频名」.mp4</text>
             <circle cx="248" cy="7" r="7" fill="#75d6b2"/>
-            <text x="262" y="12" fill="#55566d">cover.jpg · bilingual.srt</text>
+            <text x="262" y="12" fill="#55566d">封面.jpg · 双语字幕.srt</text>
           </g>
         </g>
 

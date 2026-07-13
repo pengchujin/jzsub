@@ -162,6 +162,60 @@ class VerifyDeliveryTests(unittest.TestCase):
         self.assertTrue(result["complete"])
         self.assertEqual(result["stage"], "bilingual_subs_complete")
 
+    def test_full_delivery_uses_manifest_bilingual_filename(self) -> None:
+        inputs = self.root / "subtitles" / "translation-input"
+        inputs.mkdir(parents=True)
+        batch = inputs / "batch-0001.json"
+        batch.write_text("{}", encoding="utf-8")
+        outputs = self.root / "subtitles" / "translation-output"
+        outputs.mkdir()
+        (outputs / "batch-0001.json").write_text("{}", encoding="utf-8")
+        (self.root / "subtitles" / "subtitle-manifest.json").write_text(
+            json.dumps(
+                {
+                    "translation_batches": [{"path": str(batch)}],
+                    "translation_output_dir": str(outputs),
+                }
+            ),
+            encoding="utf-8",
+        )
+        rendered = self.root / "subtitles" / "rendered"
+        rendered.mkdir()
+        (rendered / "bilingual.ass").write_text("[Script Info]\n", encoding="utf-8")
+        (rendered / "validation.json").write_text("{}", encoding="utf-8")
+        expected = self.root / "双语字幕版「测试视频」.mp4"
+        self.manifest.write_text(
+            json.dumps(
+                {
+                    "status": "bilingual_required",
+                    "deliverable": "full",
+                    "output_directory": str(self.root),
+                    "delivery_names": {
+                        "cover": "封面.jpg",
+                        "bilingual_video": expected.name,
+                    },
+                    "artifacts": {
+                        "intermediate": {"path": self.source.name},
+                        "subtitle": {
+                            "language": "en",
+                            "source_srt": {"path": self.subtitle.name},
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (self.root / "legacy.bilingual.mp4").write_bytes(b"legacy")
+
+        pending = delivery.assess_delivery(self.manifest)
+        self.assertFalse(pending["complete"])
+        self.assertEqual(pending["missing"], [str(expected.resolve())])
+
+        expected.write_bytes(b"burned")
+        result = delivery.assess_delivery(self.manifest)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["burned_video"], str(expected.resolve()))
+
     def test_no_dialogue_subtitle_counts_as_video_only(self) -> None:
         self.manifest.write_text(
             json.dumps(

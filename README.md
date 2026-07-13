@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero-skill.svg" alt="JZSub Codex Skill — 自动下载视频并生成横屏或竖屏双语字幕 MP4" width="100%">
+  <img src="docs/assets/hero-skill-v2.svg" alt="JZSub Codex Skill — 自动下载视频并生成横屏或竖屏双语字幕 MP4" width="100%">
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@
 - **双语字幕**：紧凑分批翻译、批间上下文衔接，再按句子边界重新切分；原文保持不变。默认译成中文，`--target-lang` 可指定日语、法语等任意目标语言
 - **自动烧录**：MiSans 字幕、底部双语堆叠、自适应竖屏、精确背景、libass 渲染
 - **低耗运行**：只读取紧凑字幕文档，不读取完整清单；烧录每 5% 显示一次进度
-- **封面直取**：自动下载并转换为 JPEG
+- **封面直取**：自动下载并转换为 `封面.jpg`
 - **静默登录**：需要时直接读取 Chrome 登录态，不导出 Cookie
 - **无字幕也能用**：平台没有字幕时直接交付视频、MP4 和封面
 
@@ -64,7 +64,7 @@
     <td width="64%"><img src="docs/assets/examples/cover.jpg" alt="JZSub 自动下载的视频封面" width="100%"></td>
     <td valign="middle">
       <h3>与视频一起交付</h3>
-      <p><code>cover.jpg</code></p>
+      <p><code>封面.jpg</code></p>
       <p>自动选择平台封面并转换为通用 JPEG，无需另存网页图片。</p>
     </td>
   </tr>
@@ -99,6 +99,8 @@ $jzsub https://www.youtube.com/watch?v=VIDEO_ID
 ```
 
 JZSub 会持续执行下载、模型翻译、字幕渲染、烧录与交付检查。翻译通过紧凑队列逐批进行，不读取完整字幕清单，也不会停在仅下载完成的中间状态。
+
+默认中文交付会生成 `封面.jpg` 和 `双语字幕版「视频名」.mp4`；文件名由下载清单统一声明，续传与交付验证使用同一名称。
 
 ## 按需交付
 

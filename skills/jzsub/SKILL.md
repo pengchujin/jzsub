@@ -45,7 +45,7 @@ Authentication behavior:
 - Use `chrome:Profile 1` only when the user identifies that profile.
 - Load Chrome control only when login/CAPTCHA needs user interaction. Do not open the video merely to obtain cookies.
 
-The fetcher selects best video+audio, keeps a codec-preserving source, remuxes MP4 when compatible, downloads JPEG cover, chooses original-language manual captions before automatic captions, and writes `download-manifest.json`.
+The fetcher selects best video+audio, keeps a codec-preserving source, remuxes MP4 when compatible, downloads JPEG cover, chooses original-language manual captions before automatic captions, and writes `download-manifest.json`. Use its localized delivery names unchanged: the default Chinese target writes `封面.jpg` and returns a `burn_output` such as `双语字幕版「视频名」.mp4`.
 
 ### Exit 0: video-only complete
 
@@ -89,10 +89,10 @@ Burn once from the best source intermediate (`full` deliverable only):
 python3 <skill-dir>/scripts/burn_subtitles.py \
   "<source-master>" \
   "<job-dir>/subtitles/rendered/bilingual.ass" \
-  "<job-dir>/<title> [<id>].bilingual.mp4"
+  "<burn_output returned by fetch_video.py>"
 ```
 
-The burn script selects a libass-capable FFmpeg, checks the validation report, and fails closed when the validated font is not installed (`--allow-missing-font` accepts substitution). It prints only 5% progress milestones. Keep it as one running process; poll no more than every 30–60 seconds and read only new output.
+Never invent or translate this filename yourself. The burn script selects a libass-capable FFmpeg, checks the validation report, and fails closed when the validated font is not installed (`--allow-missing-font` accepts substitution). It prints only 5% progress milestones. Keep it as one running process; poll no more than every 30–60 seconds and read only new output.
 
 Finally run:
 
