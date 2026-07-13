@@ -70,7 +70,7 @@ python3 <skill-dir>/scripts/subtitle_pipeline.py render \
   --output-dir "<job-dir>/subtitles/rendered"
 ```
 
-This first regroups translated cue pairs into sentence-aligned timed display segments, then creates source, Chinese, bilingual SRT, and MiSans Bold ASS. The original text remains unchanged. Each caption is one bottom-anchored stack—source directly above Chinese—whose PlayRes and wrap widths follow the video's aspect ratio, so captions hug the bottom margin, portrait video stays proportional, and the two languages can never overlap; libass measures each rounded background from its exact rendered glyph layout.
+This first regroups translated cue pairs into sentence-aligned timed display segments, then creates source, Chinese, bilingual SRT, and MiSans Bold ASS. The original text remains unchanged. Each caption is one bottom-anchored stack—source directly above Chinese—whose PlayRes and wrap widths follow the video's aspect ratio, so captions hug the bottom margin, portrait video stays proportional, and the two languages can never overlap; libass draws one translucent background panel measured from the exact rendered glyph layout, so line boxes cannot double-paint into dark bands.
 
 Burn once from the best source intermediate:
 

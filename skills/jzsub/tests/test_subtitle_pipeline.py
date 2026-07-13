@@ -461,7 +461,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
         self.assertIn("Style: Bilingual,MiSans,46", rendered)
         self.assertIn("Style: BilingualBox,MiSans,46", rendered)
-        self.assertIn(",3,8,0,2,80,80,50,1", rendered)
+        self.assertIn(",4,8,0,2,80,80,50,1", rendered)
         self.assertIn("Dialogue: 0,", rendered)
         self.assertNotIn(r"{\an7\p1}", rendered)
         self.assertIn("Dialogue: 1,", rendered)
@@ -489,7 +489,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         rendered = output_dir.joinpath("bilingual.ass").read_text(encoding="utf-8")
 
         self.assertIn("Style: BilingualBox,MiSans,46", rendered)
-        self.assertIn(",3,8,0,2,80,80,50,1", rendered)
+        self.assertIn(",4,8,0,2,80,80,50,1", rendered)
         self.assertNotIn(r"{\an7\p1}", rendered)
         self.assertIn(
             r"BilingualBox,,0,0,0,,{\an2\pos(960,1030)\fs42}"

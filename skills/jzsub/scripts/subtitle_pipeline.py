@@ -980,13 +980,16 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Bilingual,{font},{CHINESE_FONT_SIZE},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
-Style: BilingualBox,{font},{CHINESE_FONT_SIZE},&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,3,8,0,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
+Style: BilingualBox,{font},{CHINESE_FONT_SIZE},&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,4,8,0,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     # One bottom-anchored event stacks source directly above Chinese, so the
     # pair hugs the bottom margin and the two languages can never overlap.
+    # The box layer uses libass BorderStyle=4: one translucent panel behind
+    # the whole event. Per-line BorderStyle=3 boxes would overlap between
+    # adjacent lines and double-paint the translucent color into dark bands.
     anchor = (
         rf"{{\an2\pos({layout['position_x']},{layout['position_y']})"
         rf"\fs{SOURCE_FONT_SIZE}}}"
