@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero-light.svg" alt="JZSub — 横屏与竖屏视频自动交付双语字幕 MP4" width="100%">
+  <img src="docs/assets/hero-daybreak.svg" alt="JZSub — 横屏与竖屏视频自动交付双语字幕 MP4" width="100%">
 </p>
 
 <p align="center">
