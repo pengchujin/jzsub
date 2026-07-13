@@ -76,6 +76,16 @@
   <img src="docs/assets/codex-usage.svg" alt="在 Codex 中安装和使用 JZSub" width="100%">
 </p>
 
+### npx 一键安装（推荐）
+
+```bash
+npx skills add pengchujin/jzsub --skill jzsub -g -a codex -y
+```
+
+需要 Node.js 18+。命令会从 GitHub 获取最新版，并把 JZSub 全局安装到 Codex。
+
+### 手动安装
+
 ```bash
 git clone https://github.com/pengchujin/jzsub.git
 mkdir -p ~/.codex/skills
