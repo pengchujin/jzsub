@@ -33,7 +33,20 @@ DELIVERABLES = ("full", "video", "subs", "bilingual-subs")
 SUBTITLE_ONLY_DELIVERABLES = frozenset({"subs", "bilingual-subs"})
 YOUTUBE_SKIP_TRANSLATIONS = "youtube:skip=translated_subs"
 AUTO_BROWSER_COOKIES = "auto"
-_CHINESE_CODES = {"zh", "zho", "chi", "cmn", "yue", "wuu"}
+DEFAULT_TARGET_LANGUAGE = "zh-CN"
+# Alias groups so e.g. a zh-CN target also excludes zho/cmn/yue source tracks.
+_LANGUAGE_ALIAS_GROUPS = (
+    {"zh", "zho", "chi", "cmn", "yue", "wuu"},
+    {"ja", "jpn"},
+    {"ko", "kor"},
+    {"en", "eng"},
+    {"fr", "fra", "fre"},
+    {"de", "deu", "ger"},
+    {"es", "spa"},
+    {"pt", "por"},
+    {"ru", "rus"},
+    {"it", "ita"},
+)
 _NON_SUBTITLE_CODES = {"live_chat", "live-chat", "danmaku"}
 _UNSAFE_FILENAME = re.compile(r"[<>:\"/\\|?*%\x00-\x1f\x7f]")
 _CREDENTIAL_REMAINDER = re.compile(
@@ -295,13 +308,32 @@ def _language_base(language: str) -> str:
     return normalized.split("-", 1)[0]
 
 
-def _excluded_language(language: str) -> bool:
+def _validated_target_language(target_lang: str | None) -> str:
+    if target_lang is None:
+        return DEFAULT_TARGET_LANGUAGE
+    cleaned = target_lang.strip()
+    if not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*", cleaned):
+        raise FetchError("--target-lang must be a language tag such as zh-CN, ja, or fr")
+    return cleaned
+
+
+def _target_language_bases(target_lang: str) -> frozenset[str]:
+    base = _language_base(target_lang)
+    for group in _LANGUAGE_ALIAS_GROUPS:
+        if base in group:
+            return frozenset(group)
+    return frozenset({base})
+
+
+def _excluded_language(language: str, target_bases: frozenset[str]) -> bool:
+    """Exclude non-subtitle tracks and tracks already in the target language."""
+
     normalized = _normalized_language(language)
     segments = set(normalized.split("-"))
     return (
         normalized in _NON_SUBTITLE_CODES
-        or _language_base(normalized) in _CHINESE_CODES
-        or bool(segments & _CHINESE_CODES)
+        or _language_base(normalized) in target_bases
+        or bool(segments & target_bases)
     )
 
 
@@ -334,7 +366,9 @@ def _youtube_track_is_translated(track: Any) -> bool:
     return bool(re.search(r"\bfrom\b", name)) or source in {"translation", "translated"}
 
 
-def _candidate_rows(info: dict[str, Any]) -> list[dict[str, Any]]:
+def _candidate_rows(
+    info: dict[str, Any], target_bases: frozenset[str]
+) -> list[dict[str, Any]]:
     extractor = str(info.get("extractor_key") or info.get("extractor") or "").lower()
     is_youtube = "youtube" in extractor
     rows: list[dict[str, Any]] = []
@@ -344,7 +378,7 @@ def _candidate_rows(info: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         for position, (language, tracks) in enumerate(mapping.items()):
             language = str(language)
-            if _excluded_language(language):
+            if _excluded_language(language, target_bases):
                 continue
             normalized_tracks = tracks if isinstance(tracks, list) else [tracks]
             if is_youtube and any(_youtube_track_is_translated(track) for track in normalized_tracks):
@@ -394,14 +428,19 @@ def _needs_ytdlp_subtitle_conversion(choice: SubtitleChoice) -> bool:
 
 
 def select_source_subtitle(
-    info: dict[str, Any], source_lang: str | None = None
+    info: dict[str, Any],
+    source_lang: str | None = None,
+    target_lang: str = DEFAULT_TARGET_LANGUAGE,
 ) -> SubtitleChoice | None:
-    """Choose one non-Chinese, non-translated original-language subtitle."""
+    """Choose one non-target-language, non-translated original subtitle."""
 
-    rows = _candidate_rows(info)
+    target_bases = _target_language_bases(target_lang)
+    rows = _candidate_rows(info, target_bases)
     if source_lang:
-        if _excluded_language(source_lang):
-            raise SubtitleSelectionError("--source-lang must name a non-Chinese subtitle track")
+        if _excluded_language(source_lang, target_bases):
+            raise SubtitleSelectionError(
+                "--source-lang must not name the translation target language"
+            )
         requested = _normalized_language(source_lang)
         requested_base = _language_base(requested)
         matches = [
@@ -433,9 +472,9 @@ def select_source_subtitle(
         ).strip()
         if _language_base(declared_language) in {"und", "mul", "unknown"}:
             declared_language = ""
-        if declared_language and _excluded_language(declared_language):
-            # A Chinese-source video does not need a Chinese translation. Other
-            # advertised tracks may be translations, so do not guess one.
+        if declared_language and _excluded_language(declared_language, target_bases):
+            # A video already in the target language needs no translation.
+            # Other advertised tracks may be translations, so do not guess one.
             return None
 
         selected = None
@@ -518,14 +557,16 @@ def select_source_subtitle(
     )
 
 
-def available_subtitle_summary(info: dict[str, Any]) -> list[dict[str, Any]]:
+def available_subtitle_summary(
+    info: dict[str, Any], target_lang: str = DEFAULT_TARGET_LANGUAGE
+) -> list[dict[str, Any]]:
     return [
         {
             "language": row["language"],
             "kind": row["kind"],
             "formats": list(row["formats"]),
         }
-        for row in _candidate_rows(info)
+        for row in _candidate_rows(info, _target_language_bases(target_lang))
     ]
 
 
@@ -851,11 +892,13 @@ def _manifest_base(
     allow_remote_ejs: bool,
     choice: SubtitleChoice | None,
     deliverable: str = "full",
+    target_language: str = DEFAULT_TARGET_LANGUAGE,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "deliverable": deliverable,
+        "target_language": target_language,
         "source": {
             "url": canonical_public_url(info, url),
             "extractor": info.get("extractor_key") or info.get("extractor"),
@@ -882,7 +925,7 @@ def _manifest_base(
             "format": FORMAT_SELECTOR,
             "intermediate_container": "mkv",
             "subtitle": choice._asdict() if choice else None,
-            "subtitle_candidates": available_subtitle_summary(info),
+            "subtitle_candidates": available_subtitle_summary(info, target_language),
         },
         "warnings": [],
     }
@@ -995,6 +1038,9 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
     kind = subtitle.get("kind")
     if not isinstance(language, str) or not language:
         raise FetchError("Downloaded subtitle has no language tag")
+    target_language = manifest.get("target_language")
+    if not isinstance(target_language, str) or not target_language.strip():
+        target_language = DEFAULT_TARGET_LANGUAGE
     pipeline = _load_subtitle_pipeline()
     try:
         subtitle_manifest = pipeline.prepare(
@@ -1003,6 +1049,7 @@ def _advance_bilingual_stage(download_manifest: Path) -> int:
             language,
             "smart" if kind == "automatic" else "preserve",
             _video_display_size(manifest),
+            target_language,
         )
         subtitle_data = json.loads(subtitle_manifest.read_text(encoding="utf-8"))
     except pipeline.NoDialogueError as exc:
@@ -1088,6 +1135,7 @@ def _dry_run_plan(args: argparse.Namespace) -> dict[str, Any]:
         "network_accessed": False,
         "files_written": False,
         "deliverable": getattr(args, "deliver", "full"),
+        "target_language": _validated_target_language(getattr(args, "target_lang", None)),
         "source": display_url(args.url),
         "output_directory": str(Path(args.output_dir).expanduser()),
         "browser_cookies_configured": bool(args.browser_cookies),
@@ -1146,11 +1194,12 @@ def execute(args: argparse.Namespace) -> Path | None:
         )
     deliverable = getattr(args, "deliver", "full")
     subtitles_only = deliverable in SUBTITLE_ONLY_DELIVERABLES
-    choice = select_source_subtitle(info, args.source_lang)
+    target_language = _validated_target_language(getattr(args, "target_lang", None))
+    choice = select_source_subtitle(info, args.source_lang, target_language)
     if subtitles_only and choice is None:
         raise FetchError(
             "A subtitle-only delivery was requested, but the platform advertises "
-            "no suitable non-Chinese source subtitle"
+            f"no suitable source subtitle outside the target language {target_language!r}"
         )
     manifest = _manifest_base(
         info=info,
@@ -1160,12 +1209,14 @@ def execute(args: argparse.Namespace) -> Path | None:
         allow_remote_ejs=args.allow_remote_ejs,
         choice=choice,
         deliverable=deliverable,
+        target_language=target_language,
     )
     manifest["execution"] = {"resume": bool(args.resume)}
     manifest["authentication"]["mode"] = authentication_mode
     if choice is None:
         manifest["warnings"].append(
-            "No suitable non-Chinese original subtitle was advertised by the platform"
+            "No suitable original subtitle outside the target language "
+            f"{target_language!r} was advertised by the platform"
         )
 
     if args.probe_only:
@@ -1580,6 +1631,26 @@ def run_self_tests() -> bool:
                 ["en"],
             )
 
+        def test_target_language_controls_source_exclusion(self) -> None:
+            info = {
+                "extractor_key": "Generic",
+                "subtitles": {"zh-Hans": [{"ext": "srt"}], "ja": [{"ext": "srt"}]},
+            }
+            self.assertEqual(select_source_subtitle(info).language, "ja")
+            self.assertEqual(
+                select_source_subtitle(info, None, "ja").language, "zh-Hans"
+            )
+            with self.assertRaisesRegex(SubtitleSelectionError, "target language"):
+                select_source_subtitle(info, "ja", "ja")
+            self.assertEqual(
+                [row["language"] for row in available_subtitle_summary(info, "ja")],
+                ["zh-Hans"],
+            )
+            self.assertEqual(_validated_target_language(None), "zh-CN")
+            self.assertEqual(_validated_target_language(" fr "), "fr")
+            with self.assertRaisesRegex(FetchError, "--target-lang"):
+                _validated_target_language("bad lang!!")
+
         def test_bilibili_style_ai_zh_language_is_excluded(self) -> None:
             info = {
                 "extractor_key": "BiliBili",
@@ -1808,6 +1879,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--source-lang",
         help="Override original subtitle language selection, e.g. en, en-orig, ja, or ko",
+    )
+    parser.add_argument(
+        "--target-lang",
+        default=DEFAULT_TARGET_LANGUAGE,
+        help=(
+            "Translation target language tag (default: zh-CN). Any language the "
+            "session model speaks works, e.g. ja or fr; source tracks already in "
+            "the target language are skipped"
+        ),
     )
     parser.add_argument(
         "--deliver",

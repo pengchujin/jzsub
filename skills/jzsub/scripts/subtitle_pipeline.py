@@ -3,8 +3,8 @@
 
 The source SRT is archived byte-for-byte.  Source cue text is parsed into an
 immutable ledger and every rendered segment references whole ledger cues.  A
-translation file can provide only an id, the locked source hash, and Chinese
-text; it cannot provide an editable copy of the source.
+translation file can provide only an id, the locked source hash, and the
+target-language text; it cannot provide an editable copy of the source.
 """
 
 from __future__ import annotations
@@ -23,7 +23,8 @@ from typing import Any, Iterable, Iterator, Sequence
 
 SCHEMA_VERSION = 1
 PIPELINE_VERSION = "1.1"
-TRANSLATION_CONTRACT_VERSION = 3
+TRANSLATION_CONTRACT_VERSION = 4
+DEFAULT_TARGET_LANGUAGE = "zh-CN"
 ARCHIVE_NAME = "source.original.srt"
 MANIFEST_NAME = "subtitle-manifest.json"
 VALIDATION_NAME = "validation.json"
@@ -39,9 +40,9 @@ ASS_WORD_JOINER = "\u2060"
 # and 62 columns (31 CJK characters) at font 46 are each about 1430 of the
 # 1760 available PlayRes pixels on 16:9 video.
 SOURCE_WRAP_COLUMNS = 68
-CHINESE_WRAP_COLUMNS = 62
+TARGET_WRAP_COLUMNS = 62
 SOURCE_FONT_SIZE = 42
-CHINESE_FONT_SIZE = 46
+TARGET_FONT_SIZE = 46
 ASS_PLAY_RES_Y = 1080
 ASS_MARGIN_X = 80
 ASS_BOTTOM_MARGIN = 50
@@ -355,15 +356,25 @@ def _render_wrapped(text: str, max_columns: int) -> str:
     return "\n".join(wrap_layout_chunks(text, max_columns))
 
 
-def normalize_chinese_caption(text: str) -> str:
+_CHINESE_TARGET_BASES = {"zh", "zho", "chi", "cmn", "yue", "wuu"}
+
+
+def _language_base_code(language: str) -> str:
+    return language.strip().lower().replace("_", "-").split("-", 1)[0]
+
+
+def normalize_target_caption(text: str, target_language: str) -> str:
     """Apply the house style without changing the immutable source subtitle.
 
-    Full-width Chinese commas and periods become a single space inside a cue
-    and disappear at its edges. ASCII punctuation remains available for model
-    numbers, URLs, code, and foreign names.
+    Only Chinese targets have a house style: full-width commas and periods
+    become a single space inside a cue and disappear at its edges, while
+    ASCII punctuation stays available for model numbers, URLs, code, and
+    foreign names. Other target languages keep their native punctuation.
     """
 
-    return re.sub(r"\s*[，。]+\s*", " ", text).strip()
+    if _language_base_code(target_language) in _CHINESE_TARGET_BASES:
+        return re.sub(r"\s*[，。]+\s*", " ", text).strip()
+    return text.strip()
 
 
 _SENTENCE_END = re.compile(r"[.!?。！？…][\"'”’)）\]】》]*\s*$")
@@ -478,6 +489,7 @@ def _compact_translation_item(
 def _write_translation_batches(
     work_dir: Path,
     source_language: str,
+    target_language: str,
     cues: Sequence[dict[str, Any]],
     segments: Sequence[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -501,13 +513,13 @@ def _write_translation_batches(
         payload = {
             "translation_contract_version": TRANSLATION_CONTRACT_VERSION,
             "source_language": source_language,
-            "target_language": "zh-CN",
+            "target_language": target_language,
             "context": {
                 "before": [_compact_translation_item(item, cue_by_id) for item in before],
                 "after": [_compact_translation_item(item, cue_by_id) for item in after],
             },
             "items": [_compact_translation_item(item, cue_by_id) for item in selected],
-            "output_fields": ["id", "zh_cn"],
+            "output_fields": ["id", "translation"],
         }
         path = (input_dir / f"batch-{batch_number:04d}.json").resolve()
         encoded = _canonical_json_bytes(payload) + b"\n"
@@ -540,12 +552,16 @@ def prepare(
     source_language: str,
     segment_mode: str = "preserve",
     video_size: tuple[int, int] | None = None,
+    target_language: str = DEFAULT_TARGET_LANGUAGE,
 ) -> Path:
     source_srt = source_srt.expanduser().resolve()
     work_dir = work_dir.expanduser().resolve()
     width, height = _validated_video_size(video_size)
     if not source_language.strip():
         raise PipelineError("--source-language cannot be empty")
+    target_language = target_language.strip()
+    if not target_language or not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*", target_language):
+        raise PipelineError("--target-language must be a language tag such as zh-CN, ja, or fr")
     try:
         raw = source_srt.read_bytes()
     except FileNotFoundError as exc:
@@ -577,7 +593,7 @@ def prepare(
         raise PipelineError("source archive is not byte-for-byte identical")
 
     batches = _write_translation_batches(
-        work_dir, source_language.strip(), cues, segments
+        work_dir, source_language.strip(), target_language, cues, segments
     )
     translation_output_dir = (work_dir / TRANSLATION_OUTPUT_DIR).resolve()
     translation_output_dir.mkdir(parents=True, exist_ok=True)
@@ -586,7 +602,7 @@ def prepare(
         "pipeline_version": PIPELINE_VERSION,
         "translation_contract_version": TRANSLATION_CONTRACT_VERSION,
         "source_language": source_language.strip(),
-        "target_language": "zh-CN",
+        "target_language": target_language,
         "segment_mode": segment_mode,
         "video_size": {"width": width, "height": height},
         "source": {
@@ -662,7 +678,7 @@ def validate_manifest(manifest_path: Path) -> dict[str, Any]:
     if covered != expected_order:
         raise PipelineError("segments do not cover source cues exactly once and in order")
 
-    if contract_version not in {1, 2, TRANSLATION_CONTRACT_VERSION}:
+    if contract_version not in {1, 2, 3, TRANSLATION_CONTRACT_VERSION}:
         raise PipelineError("unsupported translation contract version")
     batches = manifest.get("translation_batches")
     if not isinstance(batches, list) or not batches:
@@ -686,7 +702,7 @@ def validate_manifest(manifest_path: Path) -> dict[str, Any]:
         payload = _read_json(path)
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
             raise PipelineError(f"invalid translation input batch: {path}")
-        if payload.get("source_language") != manifest.get("source_language") or payload.get("target_language") != "zh-CN":
+        if payload.get("source_language") != manifest.get("source_language") or payload.get("target_language") != manifest.get("target_language"):
             raise PipelineError(f"translation input contract mismatch: {path}")
         if contract_version == 1:
             expected_contract = {
@@ -696,7 +712,7 @@ def validate_manifest(manifest_path: Path) -> dict[str, Any]:
             }
             if payload.get("task") != "translate_subtitles_to_simplified_chinese" or payload.get("execution_contract") != expected_contract:
                 raise PipelineError(f"translation input contract mismatch: {path}")
-        elif payload.get("translation_contract_version") != contract_version or payload.get("output_fields") != ["id", "zh_cn"]:
+        elif payload.get("translation_contract_version") != contract_version or payload.get("output_fields") != ["id", _translation_field(manifest)]:
             raise PipelineError(f"translation input contract mismatch: {path}")
         item_ids = [item.get("id") for item in payload["items"] if isinstance(item, dict)]
         if item_ids != batch.get("segment_ids"):
@@ -735,14 +751,23 @@ def validate_manifest(manifest_path: Path) -> dict[str, Any]:
     return manifest
 
 
-def _translation_records_from_root(root: Any, path: Path) -> list[dict[str, Any]]:
+def _translation_field(manifest: dict[str, Any]) -> str:
+    """Output field name: generic since contract v4, zh_cn on legacy manifests."""
+
+    contract_version = manifest.get("translation_contract_version", 1)
+    return "translation" if isinstance(contract_version, int) and contract_version >= 4 else "zh_cn"
+
+
+def _translation_records_from_root(
+    root: Any, path: Path, field: str = "translation"
+) -> list[dict[str, Any]]:
     if isinstance(root, list):
         records = root
     elif isinstance(root, dict) and set(root) == {"translations"}:
         records = root["translations"]
     elif isinstance(root, dict) and set(root) in (
-        {"id", "zh_cn"},
-        {"id", "source_sha256", "zh_cn"},
+        {"id", field},
+        {"id", "source_sha256", field},
     ):
         records = [root]
     else:
@@ -755,10 +780,10 @@ def _translation_records_from_root(root: Any, path: Path) -> list[dict[str, Any]
     for index, record in enumerate(records, start=1):
         if not isinstance(record, dict):
             raise PipelineError(f"translation {index} in {path} must be an object")
-        allowed_sets = ({"id", "zh_cn"}, {"id", "source_sha256", "zh_cn"})
+        allowed_sets = ({"id", field}, {"id", "source_sha256", field})
         if set(record) not in allowed_sets:
-            allowed = {"id", "zh_cn"}
-            extra = sorted(set(record) - {"id", "source_sha256", "zh_cn"})
+            allowed = {"id", field}
+            extra = sorted(set(record) - {"id", "source_sha256", field})
             missing = sorted(allowed - set(record))
             raise PipelineError(
                 f"translation {index} in {path} has forbidden/missing fields "
@@ -766,10 +791,10 @@ def _translation_records_from_root(root: Any, path: Path) -> list[dict[str, Any]
             )
         if not all(isinstance(value, str) for value in record.values()):
             raise PipelineError(f"translation {index} in {path} fields must be strings")
-        zh_cn = record["zh_cn"]
-        if not zh_cn.strip():
+        translated = record[field]
+        if not translated.strip():
             raise PipelineError(f"translation {record['id']} in {path} is empty")
-        if any(unicodedata.category(character) == "Cc" for character in zh_cn):
+        if any(unicodedata.category(character) == "Cc" for character in translated):
             raise PipelineError(
                 f"translation {record['id']} in {path} contains a control character"
             )
@@ -787,10 +812,11 @@ def load_translations(
     if not files:
         raise PipelineError(f"no translation JSON files found in {translations_dir}")
 
+    field = _translation_field(manifest)
     expected = {segment["id"]: segment for segment in manifest["segments"]}
     collected: dict[str, str] = {}
     for path in files:
-        for record in _translation_records_from_root(_read_json(path), path):
+        for record in _translation_records_from_root(_read_json(path), path, field):
             segment_id = record["id"]
             if segment_id in collected:
                 raise PipelineError(f"duplicate translation ID: {segment_id}")
@@ -798,7 +824,7 @@ def load_translations(
                 raise PipelineError(f"extra translation ID: {segment_id}")
             if "source_sha256" in record and record["source_sha256"] != expected[segment_id]["source_sha256"]:
                 raise PipelineError(f"source SHA-256 mismatch for translation {segment_id}")
-            collected[segment_id] = record["zh_cn"]
+            collected[segment_id] = record[field]
 
     missing = [segment_id for segment_id in expected if segment_id not in collected]
     if missing:
@@ -820,7 +846,9 @@ def next_translation_batch(manifest_path: Path) -> dict[str, Any]:
         if not output_path.exists():
             pending.append((batch, output_path))
             continue
-        records = _translation_records_from_root(_read_json(output_path), output_path)
+        records = _translation_records_from_root(
+            _read_json(output_path), output_path, _translation_field(manifest)
+        )
         if [record["id"] for record in records] != batch["segment_ids"]:
             raise PipelineError(f"translation output IDs mismatch: {output_path}")
     if not pending:
@@ -956,7 +984,7 @@ def _ass_layout(manifest: dict[str, Any]) -> dict[str, int]:
         "play_res_x": play_res_x,
         "play_res_y": play_res_y,
         "source_columns": max(12, min(SOURCE_WRAP_COLUMNS, 2 * available // SOURCE_FONT_SIZE)),
-        "chinese_columns": max(8, min(CHINESE_WRAP_COLUMNS, 2 * available // CHINESE_FONT_SIZE)),
+        "target_columns": max(8, min(TARGET_WRAP_COLUMNS, 2 * available // TARGET_FONT_SIZE)),
         "position_x": play_res_x // 2,
         "position_y": play_res_y - ASS_BOTTOM_MARGIN,
     }
@@ -979,49 +1007,56 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Bilingual,{font},{CHINESE_FONT_SIZE},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
-Style: BilingualBox,{font},{CHINESE_FONT_SIZE},&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,4,8,0,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
+Style: Bilingual,{font},{TARGET_FONT_SIZE},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
+Style: BilingualBox,{font},{TARGET_FONT_SIZE},&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,4,8,0,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    # One bottom-anchored event stacks source directly above Chinese, so the
-    # pair hugs the bottom margin and the two languages can never overlap.
-    # The box layer uses libass BorderStyle=4: one translucent panel behind
-    # the whole event. Per-line BorderStyle=3 boxes would overlap between
-    # adjacent lines and double-paint the translucent color into dark bands.
+    # One bottom-anchored event stacks source directly above the translation,
+    # so the pair hugs the bottom margin and the two languages can never
+    # overlap. The box layer uses libass BorderStyle=4: one translucent panel
+    # behind the whole event. Per-line BorderStyle=3 boxes would overlap
+    # between adjacent lines and double-paint the translucent color.
     anchor = (
         rf"{{\an2\pos({layout['position_x']},{layout['position_y']})"
         rf"\fs{SOURCE_FONT_SIZE}}}"
     )
+    target_language = str(manifest.get("target_language") or DEFAULT_TARGET_LANGUAGE)
     dialogue: list[str] = []
     for segment in _render_segments(manifest):
         source_exact = _segment_source_text(segment, cue_by_id)
-        chinese_exact = normalize_chinese_caption(
-            _display_translation(manifest, segment, translations)
+        target_exact = normalize_target_caption(
+            _display_translation(manifest, segment, translations), target_language
         )
         source = "\n".join(wrap_layout_chunks(source_exact, layout["source_columns"]))
-        chinese = "\n".join(wrap_layout_chunks(chinese_exact, layout["chinese_columns"]))
+        target = "\n".join(wrap_layout_chunks(target_exact, layout["target_columns"]))
         escaped_source = ass_escape(source)
-        escaped_chinese = ass_escape(chinese)
+        escaped_target = ass_escape(target)
         if ass_unescape_for_validation(escaped_source) != source:
             raise PipelineError(f"ASS source escape round-trip failed for {segment['id']}")
-        if ass_unescape_for_validation(escaped_chinese) != chinese:
+        if ass_unescape_for_validation(escaped_target) != target:
             raise PipelineError(f"ASS translation escape round-trip failed for {segment['id']}")
         start = _ass_timestamp(segment["start_ms"])
         end_ms = max(segment["end_ms"], segment["start_ms"] + 10)
         end = _ass_timestamp(end_ms, end=True)
         box_text = (
             f"{anchor}{escaped_source}"
-            rf"\N{{\fs{CHINESE_FONT_SIZE}}}{escaped_chinese}"
+            rf"\N{{\fs{TARGET_FONT_SIZE}}}{escaped_target}"
         )
         text = (
             f"{anchor}{escaped_source}"
-            rf"\N{{\fs{CHINESE_FONT_SIZE}\1c&H00FFFF&}}{escaped_chinese}"
+            rf"\N{{\fs{TARGET_FONT_SIZE}\1c&H00FFFF&}}{escaped_target}"
         )
         dialogue.append(f"Dialogue: 0,{start},{end},BilingualBox,,0,0,0,,{box_text}")
         dialogue.append(f"Dialogue: 1,{start},{end},Bilingual,,0,0,0,,{text}")
     return header + "\n".join(dialogue) + "\n"
+
+
+def _target_srt_name(manifest: dict[str, Any]) -> str:
+    target_language = str(manifest.get("target_language") or DEFAULT_TARGET_LANGUAGE)
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", target_language).strip("_-") or "target"
+    return f"{safe}.srt"
 
 
 def _expected_outputs(
@@ -1029,8 +1064,9 @@ def _expected_outputs(
 ) -> dict[str, bytes]:
     cue_by_id = _cue_map(manifest)
     layout = _ass_layout(manifest)
+    target_language = str(manifest.get("target_language") or DEFAULT_TARGET_LANGUAGE)
     source_entries: list[tuple[int, int, str]] = []
-    chinese_entries: list[tuple[int, int, str]] = []
+    target_entries: list[tuple[int, int, str]] = []
     bilingual_entries: list[tuple[int, int, str]] = []
     for segment in _render_segments(manifest):
         source_exact = _segment_source_text(segment, cue_by_id)
@@ -1038,20 +1074,20 @@ def _expected_outputs(
         if "".join(source_chunks) != source_exact:
             raise PipelineError(f"source wrapping changed {segment['id']}")
         source_layout = "\n".join(source_chunks)
-        chinese_exact = normalize_chinese_caption(
-            _display_translation(manifest, segment, translations)
+        target_exact = normalize_target_caption(
+            _display_translation(manifest, segment, translations), target_language
         )
-        chinese_chunks = wrap_layout_chunks(chinese_exact, layout["chinese_columns"])
-        if "".join(chinese_chunks) != chinese_exact:
-            raise PipelineError(f"Chinese wrapping changed {segment['id']}")
-        chinese_layout = "\n".join(chinese_chunks)
+        target_chunks = wrap_layout_chunks(target_exact, layout["target_columns"])
+        if "".join(target_chunks) != target_exact:
+            raise PipelineError(f"translation wrapping changed {segment['id']}")
+        target_layout = "\n".join(target_chunks)
         timing = (segment["start_ms"], segment["end_ms"])
         source_entries.append((*timing, source_layout))
-        chinese_entries.append((*timing, chinese_layout))
-        bilingual_entries.append((*timing, f"{source_layout}\n{chinese_layout}"))
+        target_entries.append((*timing, target_layout))
+        bilingual_entries.append((*timing, f"{source_layout}\n{target_layout}"))
     return {
         "source.srt": _render_srt(source_entries).encode("utf-8"),
-        "zh-CN.srt": _render_srt(chinese_entries).encode("utf-8"),
+        _target_srt_name(manifest): _render_srt(target_entries).encode("utf-8"),
         "bilingual.srt": _render_srt(bilingual_entries).encode("utf-8"),
         "bilingual.ass": _render_ass(manifest, translations, font).encode("utf-8"),
     }
@@ -1093,6 +1129,7 @@ def _validation_report(
         "structurally_valid": True,
         "validation_scope": "structural_source_integrity",
         "translation_quality_reviewed": False,
+        "target_language": manifest.get("target_language") or DEFAULT_TARGET_LANGUAGE,
         "source_sha256": manifest["source"]["sha256"],
         "source_ledger_sha256": manifest["source_ledger_sha256"],
         "segment_ledger_sha256": manifest["segment_ledger_sha256"],
@@ -1172,6 +1209,11 @@ def _parser() -> argparse.ArgumentParser:
         metavar="WIDTHxHEIGHT",
         help="video display size used for caption layout (default: 1920x1080)",
     )
+    prepare_parser.add_argument(
+        "--target-language",
+        default=DEFAULT_TARGET_LANGUAGE,
+        help="translation target language tag, e.g. zh-CN (default), ja, or fr",
+    )
 
     next_parser = commands.add_parser(
         "next-batch", help="print only the next pending compact translation batch"
@@ -1213,6 +1255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.source_language,
                 args.segment_mode,
                 _parse_video_size(args.video_size),
+                args.target_language,
             )
             payload = {"ok": True, "manifest": str(result)}
         elif args.command == "next-batch":

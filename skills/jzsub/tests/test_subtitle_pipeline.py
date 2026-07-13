@@ -58,7 +58,7 @@ class SubtitlePipelineTests(unittest.TestCase):
             records = [
                 {
                     "id": segment["id"],
-                    "zh_cn": f"中文 {index}",
+                    "translation": f"中文 {index}",
                 }
                 for index, segment in enumerate(manifest["segments"], start=1)
             ]
@@ -72,13 +72,13 @@ class SubtitlePipelineTests(unittest.TestCase):
         manifest_path, manifest = self.prepare_fixture(
             srt([("00:00:00,000", "00:00:01,000", "Hello world")])
         )
-        self.assertEqual(manifest["translation_contract_version"], 3)
+        self.assertEqual(manifest["translation_contract_version"], 4)
         batch = json.loads(
             Path(manifest["translation_batches"][0]["path"]).read_text(encoding="utf-8")
         )
         self.assertEqual(set(batch["items"][0]), {"id", "source"})
         self.assertNotIn("source_sha256", json.dumps(batch))
-        self.assertEqual(batch["output_fields"], ["id", "zh_cn"])
+        self.assertEqual(batch["output_fields"], ["id", "translation"])
 
         translations_dir = self.write_translations(manifest)
         pipeline.render(manifest_path, translations_dir, self.root / "output")
@@ -103,7 +103,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         output.write_text(
             json.dumps(
                 {"translations": [
-                    {"id": item["id"], "zh_cn": "中文"}
+                    {"id": item["id"], "translation": "中文"}
                     for item in first["batch"]["items"]
                 ]},
                 ensure_ascii=False,
@@ -154,7 +154,7 @@ class SubtitlePipelineTests(unittest.TestCase):
             Path(pending["output_path"]).write_text(
                 json.dumps(
                     {"translations": [
-                        {"id": item["id"], "zh_cn": "中文"}
+                        {"id": item["id"], "translation": "中文"}
                         for item in pending["batch"]["items"]
                     ]},
                     ensure_ascii=False,
@@ -179,8 +179,8 @@ class SubtitlePipelineTests(unittest.TestCase):
         translations_dir = self.write_translations(
             manifest,
             records=[
-                {"id": manifest["segments"][0]["id"], "zh_cn": "短句"},
-                {"id": manifest["segments"][1]["id"], "zh_cn": "这是一条会换行的较长中文字幕 用来验证位置固定"},
+                {"id": manifest["segments"][0]["id"], "translation": "短句"},
+                {"id": manifest["segments"][1]["id"], "translation": "这是一条会换行的较长中文字幕 用来验证位置固定"},
             ],
         )
         output_dir = self.root / "output"
@@ -217,7 +217,7 @@ class SubtitlePipelineTests(unittest.TestCase):
             records=[
                 {
                     "id": manifest["segments"][0]["id"],
-                    "zh_cn": "竖屏视频中的中文字幕必须按较窄的宽度换行",
+                    "translation": "竖屏视频中的中文字幕必须按较窄的宽度换行",
                 }
             ],
         )
@@ -227,7 +227,7 @@ class SubtitlePipelineTests(unittest.TestCase):
 
         layout = pipeline._ass_layout(manifest)
         self.assertEqual(layout["play_res_x"], round(1080 * 1080 / 1920))
-        self.assertLess(layout["chinese_columns"], pipeline.CHINESE_WRAP_COLUMNS)
+        self.assertLess(layout["target_columns"], pipeline.TARGET_WRAP_COLUMNS)
         self.assertLess(layout["source_columns"], pipeline.SOURCE_WRAP_COLUMNS)
         self.assertIn(f"PlayResX: {layout['play_res_x']}", rendered)
         self.assertIn("PlayResY: 1080", rendered)
@@ -268,7 +268,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         batch_path = Path(manifest["translation_batches"][0]["path"])
         batch = json.loads(batch_path.read_text(encoding="utf-8"))
         self.assertEqual(batch["items"][0]["source"], "  Café & co.  ")
-        self.assertEqual(batch["output_fields"], ["id", "zh_cn"])
+        self.assertEqual(batch["output_fields"], ["id", "translation"])
         self.assertNotIn("source", batch["output_fields"])
 
         translations_dir = self.write_translations(manifest)
@@ -299,7 +299,7 @@ class SubtitlePipelineTests(unittest.TestCase):
                 {
                     "id": segment["id"],
                     "source_sha256": segment["source_sha256"],
-                    "zh_cn": translation,
+                    "translation": translation,
                 }
             ],
         )
@@ -357,7 +357,7 @@ class SubtitlePipelineTests(unittest.TestCase):
                 {
                     "id": first["id"],
                     "source_sha256": first["source_sha256"],
-                    "zh_cn": "一",
+                    "translation": "一",
                 }
             ],
         )
@@ -368,7 +368,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         valid_first = {
             "id": first["id"],
             "source_sha256": first["source_sha256"],
-            "zh_cn": "一",
+            "translation": "一",
         }
         self.write_translations(manifest, records=[valid_first], filename="a.json")
         self.write_translations(manifest, records=[valid_first], filename="b.json")
@@ -381,7 +381,7 @@ class SubtitlePipelineTests(unittest.TestCase):
             {
                 "id": second["id"],
                 "source_sha256": second["source_sha256"],
-                "zh_cn": "二",
+                "translation": "二",
             },
         ]
         self.write_translations(manifest, records=records)
@@ -398,7 +398,7 @@ class SubtitlePipelineTests(unittest.TestCase):
             "id": segment["id"],
             "source_sha256": segment["source_sha256"],
             "source": "rewritten",
-            "zh_cn": "中文",
+            "translation": "中文",
         }
         translations_dir = self.write_translations(manifest, records=[forbidden])
         with self.assertRaisesRegex(pipeline.PipelineError, "forbidden/missing fields"):
@@ -408,7 +408,7 @@ class SubtitlePipelineTests(unittest.TestCase):
         controlled = {
             "id": segment["id"],
             "source_sha256": segment["source_sha256"],
-            "zh_cn": "中\n文",
+            "translation": "中\n文",
         }
         self.write_translations(manifest, records=[controlled])
         with self.assertRaisesRegex(pipeline.PipelineError, "control character"):
@@ -441,15 +441,15 @@ class SubtitlePipelineTests(unittest.TestCase):
                 {
                     "id": segment["id"],
                     "source_sha256": segment["source_sha256"],
-                    "zh_cn": "你好，世界。",
+                    "translation": "你好，世界。",
                 }
             ],
         )
         output_dir = self.root / "output"
         pipeline.render(manifest_path, translations_dir, output_dir)
 
-        self.assertEqual(pipeline.normalize_chinese_caption("你好，世界。"), "你好 世界")
-        self.assertEqual(pipeline.normalize_chinese_caption("版本 5.6，发布。"), "版本 5.6 发布")
+        self.assertEqual(pipeline.normalize_target_caption("你好，世界。", "zh-CN"), "你好 世界")
+        self.assertEqual(pipeline.normalize_target_caption("版本 5.6，发布。", "zh-CN"), "版本 5.6 发布")
         chinese_srt = output_dir.joinpath("zh-CN.srt").read_text(encoding="utf-8")
         self.assertIn("你好 世界", chinese_srt)
         self.assertNotIn("，", chinese_srt)
@@ -480,7 +480,7 @@ class SubtitlePipelineTests(unittest.TestCase):
                 {
                     "id": segment["id"],
                     "source_sha256": segment["source_sha256"],
-                    "zh_cn": "日文字形宽度与拉丁文字不同",
+                    "translation": "日文字形宽度与拉丁文字不同",
                 }
             ],
         )
@@ -541,13 +541,51 @@ class SubtitlePipelineTests(unittest.TestCase):
         self.assertEqual(len(one_line), 24)
         translations_dir = self.write_translations(
             manifest,
-            records=[{"id": manifest["segments"][0]["id"], "zh_cn": one_line}],
+            records=[{"id": manifest["segments"][0]["id"], "translation": one_line}],
         )
         output_dir = self.root / "output"
         pipeline.render(manifest_path, translations_dir, output_dir)
         chinese_srt = output_dir.joinpath("zh-CN.srt").read_text(encoding="utf-8")
         chinese_lines = [line for line in chinese_srt.splitlines()[2:] if line]
         self.assertEqual(chinese_lines, [one_line])
+
+    def test_japanese_target_keeps_punctuation_and_names_outputs(self) -> None:
+        self.assertEqual(
+            pipeline.normalize_target_caption("こんにちは、世界。", "ja"),
+            "こんにちは、世界。",
+        )
+        source = self.root / "downloaded.srt"
+        source.write_bytes(srt([("00:00:00,000", "00:00:02,000", "Hello world.")]))
+        manifest_path = pipeline.prepare(
+            source, self.root / "work", "en", "preserve", None, "ja"
+        )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["target_language"], "ja")
+        batch = json.loads(
+            Path(manifest["translation_batches"][0]["path"]).read_text(encoding="utf-8")
+        )
+        self.assertEqual(batch["target_language"], "ja")
+
+        translations_dir = self.write_translations(
+            manifest,
+            records=[
+                {"id": manifest["segments"][0]["id"], "translation": "こんにちは、世界。"}
+            ],
+        )
+        output_dir = self.root / "output"
+        pipeline.render(manifest_path, translations_dir, output_dir)
+        ja_srt = output_dir.joinpath("ja.srt").read_text(encoding="utf-8")
+        self.assertIn("こんにちは、世界。", ja_srt)
+        self.assertFalse(output_dir.joinpath("zh-CN.srt").exists())
+        report = json.loads(output_dir.joinpath("validation.json").read_text())
+        self.assertEqual(report["target_language"], "ja")
+        pipeline.validate(manifest_path, translations_dir, output_dir)
+
+    def test_rejects_invalid_target_language_tag(self) -> None:
+        source = self.root / "downloaded.srt"
+        source.write_bytes(srt([("00:00:00,000", "00:00:01,000", "Hi")]))
+        with self.assertRaisesRegex(pipeline.PipelineError, "--target-language"):
+            pipeline.prepare(source, self.root / "work", "en", "preserve", None, "bad lang!!")
 
     def test_sound_annotation_cues_are_excluded_from_translation(self) -> None:
         self.assertTrue(pipeline.is_non_dialogue_annotation("[Music]"))
