@@ -52,7 +52,7 @@
 ## 竖屏视频支持
 
 <p align="center">
-  <img src="docs/assets/examples/portrait-support.jpg" alt="YouTube Shorts 竖屏原片与 JZSub 双语字幕成片对比" width="100%">
+  <img src="docs/assets/examples/portrait-before-after.jpg" alt="YouTube Shorts 竖屏原片与 JZSub 双语字幕成片对比" width="100%">
 </p>
 
 <p align="center"><sub>左：无字幕原片　·　右：JZSub 竖屏双语字幕成片。自动使用更紧凑的字号与更大的底部安全区。截图来自 <a href="https://www.youtube.com/shorts/RiuhHBBWShg">Parking Sensor (DIY)</a>。</sub></p>
