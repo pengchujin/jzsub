@@ -49,6 +49,14 @@
 
 <p align="center"><sub>左：下载后的原片　·　右：JZSub 生成并烧录的原文＋中文双语字幕</sub></p>
 
+## 竖屏视频支持
+
+<p align="center">
+  <img src="docs/assets/examples/portrait-support.jpg" alt="JZSub 在 YouTube Shorts 竖屏视频中的双语字幕效果" width="360">
+</p>
+
+<p align="center"><sub>自动识别 9:16 画面，使用更紧凑的字号与更大的底部安全区。截图来自 <a href="https://www.youtube.com/shorts/RiuhHBBWShg">Parking Sensor (DIY)</a>。</sub></p>
+
 ## 封面自动获取
 
 <table>
