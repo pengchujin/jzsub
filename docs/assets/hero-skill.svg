@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="title desc">
+  <title id="title">JZSub Codex Skill</title>
+  <desc id="desc">输入视频链接，自动下载、翻译、生成双语字幕并烧录横屏或竖屏 MP4</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f8f7ff"/>
+      <stop offset=".52" stop-color="#eef7ff"/>
+      <stop offset="1" stop-color="#eafbf6"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#6255f6"/>
+      <stop offset="1" stop-color="#8478ff"/>
+    </linearGradient>
+    <linearGradient id="video" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#70c7ff"/>
+      <stop offset=".52" stop-color="#8d8cff"/>
+      <stop offset="1" stop-color="#83e1bd"/>
+    </linearGradient>
+    <linearGradient id="phoneVideo" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#ffd486"/>
+      <stop offset="1" stop-color="#ff9f86"/>
+    </linearGradient>
+    <radialGradient id="orb">
+      <stop stop-color="#897cff" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#897cff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#4b4b89" flood-opacity=".13"/>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="36"/>
+    </filter>
+    <clipPath id="canvas"><rect width="1280" height="440" rx="30"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#canvas)">
+    <rect width="1280" height="440" fill="url(#bg)"/>
+    <circle cx="1115" cy="50" r="270" fill="url(#orb)"/>
+    <circle cx="520" cy="455" r="170" fill="#8de3c4" fill-opacity=".2" filter="url(#soft)"/>
+    <path d="M0 390C180 345 315 450 515 395S875 345 1280 410V440H0Z" fill="#fff" fill-opacity=".48"/>
+
+    <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+      <g transform="translate(60 46)">
+        <g>
+          <rect width="162" height="36" rx="18" fill="url(#brand)"/>
+          <path d="M20 12h12l6 6-6 6H20l-6-6Z" fill="#fff" fill-opacity=".24"/>
+          <circle cx="26" cy="18" r="4" fill="#fff"/>
+          <text x="50" y="24" fill="#fff" font-size="14" font-weight="750" letter-spacing="1.2">CODEX SKILL</text>
+        </g>
+
+        <text x="0" y="112" fill="#17172a" font-size="72" font-weight="780" letter-spacing="-3">JZSub</text>
+        <text x="0" y="157" fill="#292946" font-size="27" font-weight="680">视频下载与双语字幕自动化 Skill</text>
+        <text x="0" y="193" fill="#686982" font-size="18">One link in. Bilingual video out.</text>
+
+        <g transform="translate(0 222)">
+          <rect width="485" height="58" rx="15" fill="#fff" stroke="#dedff0"/>
+          <circle cx="28" cy="29" r="8" fill="#6d60f6"/>
+          <text x="49" y="36" fill="#383850" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="650">$jzsub https://youtube.com/...</text>
+        </g>
+
+        <g transform="translate(0 307)" font-size="14" font-weight="680">
+          <g><rect width="105" height="34" rx="17" fill="#eeeaff"/><text x="52.5" y="22" fill="#5b4ee8" text-anchor="middle">最高画质</text></g>
+          <g transform="translate(115)"><rect width="105" height="34" rx="17" fill="#e6f8f1"/><text x="52.5" y="22" fill="#208266" text-anchor="middle">GPT 翻译</text></g>
+          <g transform="translate(230)"><rect width="105" height="34" rx="17" fill="#fff0e9"/><text x="52.5" y="22" fill="#c85e3c" text-anchor="middle">字幕烧录</text></g>
+          <g transform="translate(345)"><rect width="105" height="34" rx="17" fill="#eaf5ff"/><text x="52.5" y="22" fill="#3477ae" text-anchor="middle">封面获取</text></g>
+        </g>
+
+        <text x="0" y="384" fill="#85869b" font-size="14">YouTube · Bilibili · TikTok · Vimeo · 以及更多平台</text>
+      </g>
+
+      <g transform="translate(590 47)">
+        <text x="0" y="18" fill="#7b7c91" font-size="13" font-weight="750" letter-spacing="1.1">AUTOMATED DELIVERY</text>
+        <path d="M0 32H618" stroke="#d7d9ea"/>
+
+        <g transform="translate(0 57)" filter="url(#shadow)">
+          <rect width="450" height="278" rx="24" fill="#fff"/>
+          <rect x="12" y="12" width="426" height="218" rx="17" fill="url(#video)"/>
+          <circle cx="374" cy="58" r="42" fill="#fff" fill-opacity=".33"/>
+          <path d="M12 164L103 90L187 154L287 65L438 150V230H12Z" fill="#fff" fill-opacity=".22"/>
+          <rect x="28" y="28" width="62" height="26" rx="13" fill="#fff" fill-opacity=".86"/>
+          <text x="59" y="46" fill="#514bc0" font-size="12" font-weight="750" text-anchor="middle">16:9 MP4</text>
+          <g text-anchor="middle" font-weight="750">
+            <rect x="82" y="153" width="286" height="60" rx="11" fill="#202034" fill-opacity=".82"/>
+            <text x="225" y="177" fill="#fff" font-size="15">Download once. Understand everything.</text>
+            <text x="225" y="200" fill="#b9ffdf" font-size="17">下载一次，看懂全部内容</text>
+          </g>
+          <g transform="translate(22 245)" font-size="13" font-weight="680">
+            <circle cx="7" cy="7" r="7" fill="#7a6ef7"/>
+            <text x="21" y="12" fill="#55566d">video.bilingual.mp4</text>
+            <circle cx="248" cy="7" r="7" fill="#75d6b2"/>
+            <text x="262" y="12" fill="#55566d">cover.jpg · bilingual.srt</text>
+          </g>
+        </g>
+
+        <g transform="translate(424 82)" filter="url(#shadow)">
+          <rect width="174" height="300" rx="30" fill="#fff"/>
+          <rect x="9" y="9" width="156" height="282" rx="23" fill="url(#phoneVideo)"/>
+          <rect x="59" y="16" width="56" height="17" rx="8.5" fill="#fff" fill-opacity=".48"/>
+          <rect x="21" y="47" width="52" height="25" rx="12.5" fill="#fff" fill-opacity=".88"/>
+          <text x="47" y="65" fill="#b85f45" font-size="12" font-weight="750" text-anchor="middle">9:16</text>
+          <path d="M9 198L56 126L105 177L165 102V291H9Z" fill="#fff" fill-opacity=".22"/>
+          <g text-anchor="middle" font-weight="750">
+            <rect x="19" y="208" width="136" height="62" rx="10" fill="#202034" fill-opacity=".82"/>
+            <text x="87" y="231" fill="#fff" font-size="11">Portrait ready</text>
+            <text x="87" y="251" fill="#fff" font-size="11">Safe subtitle area</text>
+            <text x="87" y="264" fill="#ffe9a8" font-size="12">竖屏字幕适配</text>
+          </g>
+        </g>
+
+        <g transform="translate(0 356)">
+          <rect width="598" height="38" rx="19" fill="#fff" fill-opacity=".74" stroke="#dedff0"/>
+          <text x="299" y="25" fill="#595a73" font-size="14" font-weight="680" text-anchor="middle">下载 → 翻译 → 重切字幕 → 横/竖屏排版 → 烧录 → 验证</text>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>
