@@ -227,10 +227,16 @@ class SubtitlePipelineTests(unittest.TestCase):
 
         layout = pipeline._ass_layout(manifest)
         self.assertEqual(layout["play_res_x"], round(1080 * 1080 / 1920))
+        self.assertEqual(layout["source_font_size"], 36)
+        self.assertEqual(layout["target_font_size"], 40)
+        self.assertEqual(layout["bottom_margin"], 120)
+        self.assertEqual(layout["position_y"], 960)
         self.assertLess(layout["target_columns"], pipeline.TARGET_WRAP_COLUMNS)
         self.assertLess(layout["source_columns"], pipeline.SOURCE_WRAP_COLUMNS)
         self.assertIn(f"PlayResX: {layout['play_res_x']}", rendered)
         self.assertIn("PlayResY: 1080", rendered)
+        self.assertIn(r"{\an2\pos(304,960)\fs36}", rendered)
+        self.assertIn(r"\N{\fs40\1c&H00FFFF&}", rendered)
         chinese_srt = output_dir.joinpath("zh-CN.srt").read_text(encoding="utf-8")
         chinese_lines = [line for line in chinese_srt.splitlines()[2:] if line]
         self.assertGreater(len(chinese_lines), 1)

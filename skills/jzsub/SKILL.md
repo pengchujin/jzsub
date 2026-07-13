@@ -81,7 +81,7 @@ python3 <skill-dir>/scripts/subtitle_pipeline.py render \
   --output-dir "<job-dir>/subtitles/rendered"
 ```
 
-This first regroups translated cue pairs into sentence-aligned timed display segments, then creates source, target-language, bilingual SRT, and MiSans Bold ASS. The original text remains unchanged. Each caption is one bottom-anchored stack—source directly above the translation—whose PlayRes and wrap widths follow the video's aspect ratio, so captions hug the bottom margin, portrait video stays proportional, and the two languages can never overlap; libass draws one translucent background panel measured from the exact rendered glyph layout, so line boxes cannot double-paint into dark bands.
+This first regroups translated cue pairs into sentence-aligned timed display segments, then creates source, target-language, bilingual SRT, and MiSans Bold ASS. The original text remains unchanged. Each caption is one bottom-anchored stack—source directly above the translation—whose PlayRes and wrap widths follow the video's aspect ratio, so the two languages can never overlap. Portrait video automatically uses smaller 36/40 source/translation sizes and a larger 120-unit bottom safe area; landscape keeps the 42/46 sizes and 50-unit margin. Libass draws one translucent background panel measured from the exact rendered glyph layout, so line boxes cannot double-paint into dark bands.
 
 Burn once from the best source intermediate (`full` deliverable only):
 

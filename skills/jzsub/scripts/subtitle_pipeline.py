@@ -43,9 +43,12 @@ SOURCE_WRAP_COLUMNS = 68
 TARGET_WRAP_COLUMNS = 62
 SOURCE_FONT_SIZE = 42
 TARGET_FONT_SIZE = 46
+PORTRAIT_SOURCE_FONT_SIZE = 36
+PORTRAIT_TARGET_FONT_SIZE = 40
 ASS_PLAY_RES_Y = 1080
 ASS_MARGIN_X = 80
 ASS_BOTTOM_MARGIN = 50
+PORTRAIT_BOTTOM_MARGIN = 120
 DEFAULT_VIDEO_SIZE = (1920, 1080)
 
 
@@ -979,14 +982,21 @@ def _ass_layout(manifest: dict[str, Any]) -> dict[str, int]:
     width, height = _manifest_video_size(manifest)
     play_res_y = ASS_PLAY_RES_Y
     play_res_x = max(320, round(play_res_y * width / height))
+    portrait = width < height
+    source_font_size = PORTRAIT_SOURCE_FONT_SIZE if portrait else SOURCE_FONT_SIZE
+    target_font_size = PORTRAIT_TARGET_FONT_SIZE if portrait else TARGET_FONT_SIZE
+    bottom_margin = PORTRAIT_BOTTOM_MARGIN if portrait else ASS_BOTTOM_MARGIN
     available = max(160, play_res_x - 2 * ASS_MARGIN_X)
     return {
         "play_res_x": play_res_x,
         "play_res_y": play_res_y,
-        "source_columns": max(12, min(SOURCE_WRAP_COLUMNS, 2 * available // SOURCE_FONT_SIZE)),
-        "target_columns": max(8, min(TARGET_WRAP_COLUMNS, 2 * available // TARGET_FONT_SIZE)),
+        "source_font_size": source_font_size,
+        "target_font_size": target_font_size,
+        "bottom_margin": bottom_margin,
+        "source_columns": max(12, min(SOURCE_WRAP_COLUMNS, 2 * available // source_font_size)),
+        "target_columns": max(8, min(TARGET_WRAP_COLUMNS, 2 * available // target_font_size)),
         "position_x": play_res_x // 2,
-        "position_y": play_res_y - ASS_BOTTOM_MARGIN,
+        "position_y": play_res_y - bottom_margin,
     }
 
 
@@ -1007,8 +1017,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Bilingual,{font},{TARGET_FONT_SIZE},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
-Style: BilingualBox,{font},{TARGET_FONT_SIZE},&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,4,8,0,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{ASS_BOTTOM_MARGIN},1
+Style: Bilingual,{font},{layout['target_font_size']},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,1,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{layout['bottom_margin']},1
+Style: BilingualBox,{font},{layout['target_font_size']},&HFF000000,&HFF000000,&H78000000,&H78000000,-1,0,0,0,100,100,0,0,4,8,0,2,{ASS_MARGIN_X},{ASS_MARGIN_X},{layout['bottom_margin']},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1020,7 +1030,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     # between adjacent lines and double-paint the translucent color.
     anchor = (
         rf"{{\an2\pos({layout['position_x']},{layout['position_y']})"
-        rf"\fs{SOURCE_FONT_SIZE}}}"
+        rf"\fs{layout['source_font_size']}}}"
     )
     target_language = str(manifest.get("target_language") or DEFAULT_TARGET_LANGUAGE)
     dialogue: list[str] = []
@@ -1042,11 +1052,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end = _ass_timestamp(end_ms, end=True)
         box_text = (
             f"{anchor}{escaped_source}"
-            rf"\N{{\fs{TARGET_FONT_SIZE}}}{escaped_target}"
+            rf"\N{{\fs{layout['target_font_size']}}}{escaped_target}"
         )
         text = (
             f"{anchor}{escaped_source}"
-            rf"\N{{\fs{TARGET_FONT_SIZE}\1c&H00FFFF&}}{escaped_target}"
+            rf"\N{{\fs{layout['target_font_size']}\1c&H00FFFF&}}{escaped_target}"
         )
         dialogue.append(f"Dialogue: 0,{start},{end},BilingualBox,,0,0,0,,{box_text}")
         dialogue.append(f"Dialogue: 1,{start},{end},Bilingual,,0,0,0,,{text}")
