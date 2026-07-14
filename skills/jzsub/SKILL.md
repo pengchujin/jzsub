@@ -92,7 +92,7 @@ python3 <skill-dir>/scripts/burn_subtitles.py \
   "<burn_output returned by fetch_video.py>"
 ```
 
-Never invent or translate this filename yourself. The burn script selects a libass-capable FFmpeg, checks the validation report, and fails closed when the validated font is not installed (`--allow-missing-font` accepts substitution). It prints only 5% progress milestones. Keep it as one running process; poll no more than every 30–60 seconds and read only new output.
+Never invent or translate this filename yourself. The burn script selects a libass-capable FFmpeg, checks the validation report, resolves the validated font file, and passes its directory to libass explicitly so the final burn uses the intended glyphs. It fails closed when the font file cannot be found (`--fonts-dir` selects a nonstandard font directory; `--allow-missing-font` accepts substitution). It prints only 5% progress milestones. Keep it as one running process; poll no more than every 30–60 seconds and read only new output.
 
 Finally run:
 
@@ -104,7 +104,7 @@ Exit 3 identifies the unfinished stage; continue it immediately. Report success 
 
 ## Preflight and failures
 
-- Require Python 3.10+, yt-dlp, ffmpeg/ffprobe, and MiSans. `burn_subtitles.py` checks libass and the MiSans font without dumping the full filter list, and prefers Homebrew `ffmpeg-full` on macOS.
+- Require Python 3.10+, yt-dlp, ffmpeg/ffprobe, and MiSans installed in a readable font directory. `burn_subtitles.py` checks libass, explicitly loads the resolved MiSans directory, and prefers Homebrew `ffmpeg-full` on macOS.
 - YouTube requires a supported JavaScript runtime; prefer Deno 2.3+. Read [platform-notes.md](references/platform-notes.md) only for extractor, format, subtitle, JS-runtime, or PO-token errors.
 - Read [chrome-auth.md](references/chrome-auth.md) only for authentication failures.
 - If source-language selection is ambiguous, ask for `--source-lang`; never assume a translated track is original.
