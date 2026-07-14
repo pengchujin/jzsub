@@ -91,6 +91,14 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="continue with libass font substitution when the validated font is not installed",
     )
+    parser.add_argument(
+        "--fonts-dir",
+        type=Path,
+        help=(
+            "directory from which libass should load subtitle fonts "
+            "(default: resolve the validated font file automatically)"
+        ),
+    )
     return parser
 
 
@@ -437,69 +445,100 @@ _FONT_DIRECTORIES = (
 )
 
 
-def _font_installed(family: str) -> bool | None:
-    """Return True/False when detection is trustworthy, None when unavailable.
+def _font_token(value: str) -> str:
+    return re.sub(r"[\s_-]+", "", value).casefold()
 
-    libass silently substitutes another font when the requested family is
-    missing, which would pass every later gate with the wrong deliverable.
-    """
 
-    fc_list = shutil.which("fc-list")
-    if fc_list:
-        result = subprocess.run(
-            [fc_list, ":", "family"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            needle = family.casefold()
-            return any(
-                needle in entry.strip().casefold()
-                for line in result.stdout.splitlines()
-                for entry in line.split(",")
-            )
-    token = re.sub(r"[\s_-]+", "", family).casefold()
+def _font_directory_from_fc_match(family: str, weight: object) -> Path | None:
+    """Return the directory holding the exact family selected by Fontconfig."""
+
+    fc_match = shutil.which("fc-match")
+    if not fc_match:
+        return None
+    style = "Bold" if isinstance(weight, int) and weight >= 600 else "Regular"
+    result = subprocess.run(
+        [fc_match, "-f", "%{family}\\n%{file}\\n", f"{family}:style={style}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if result.returncode != 0 or len(lines) < 2:
+        return None
+    matched_families, candidate = lines[0], Path(lines[1]).expanduser()
+    requested = _font_token(family)
+    if not any(_font_token(name) == requested for name in matched_families.split(",")):
+        return None
+    return candidate.parent.resolve() if candidate.is_file() else None
+
+
+def _font_directory_from_known_locations(family: str) -> Path | None:
+    """Find a readable font file when Fontconfig has no usable file path."""
+
+    token = _font_token(family)
     if not token:
         return None
-    searched = False
     for directory in _FONT_DIRECTORIES:
         base = Path(directory).expanduser()
         if not base.is_dir():
             continue
-        searched = True
         for path in base.rglob("*"):
             if (
-                path.suffix.lower() in _FONT_FILE_SUFFIXES
-                and token in re.sub(r"[\s_-]+", "", path.stem).casefold()
+                path.is_file()
+                and path.suffix.lower() in _FONT_FILE_SUFFIXES
+                and token in _font_token(path.stem)
             ):
-                return True
-    return False if searched else None
+                return path.parent.resolve()
+    return None
 
 
-def _require_subtitle_font(report: dict[str, Any], *, allow_missing_font: bool) -> None:
-    font = str(report.get("font") or "").strip()
-    if not font:
-        return
-    installed = _font_installed(font)
-    if installed is True:
-        return
-    if installed is None:
-        print(
-            f"warning: could not verify that font {font!r} is installed; "
-            "libass substitutes missing fonts silently",
-            file=sys.stderr,
-        )
-        return
+def _find_font_directory(family: str, weight: object) -> Path | None:
+    """Locate the directory libass must scan for the requested font."""
+
+    return _font_directory_from_fc_match(family, weight) or _font_directory_from_known_locations(
+        family
+    )
+
+
+def _resolve_subtitle_font_directory(
+    report: dict[str, Any],
+    *,
+    fonts_dir: Path | None,
+    allow_missing_font: bool,
+) -> Path | None:
+    """Resolve a readable font directory or fail before libass can substitute."""
+
+    if fonts_dir is not None:
+        candidate = fonts_dir.expanduser().resolve()
+        if not candidate.is_dir():
+            raise BurnError(f"fonts directory does not exist or is not a directory: {candidate}")
+        return candidate
+
+    family = str(report.get("font") or "").strip()
+    if not family:
+        return None
+    directory = _find_font_directory(family, report.get("font_weight"))
+    if directory is not None:
+        return directory
+
     message = (
-        f"font {font!r} required by the validated subtitles was not found; install it "
+        f"font {family!r} required by the validated subtitles could not be located as "
+        "a readable font file; install it or pass --fonts-dir "
         "(MiSans: https://hyperos.mi.com/font/zh/download/)"
     )
     if allow_missing_font:
         print(f"warning: {message}; continuing with libass substitution", file=sys.stderr)
-        return
+        return None
     raise BurnError(f"{message} or pass --allow-missing-font to accept substitution")
+
+
+def _require_subtitle_font(report: dict[str, Any], *, allow_missing_font: bool) -> None:
+    """Backward-compatible font gate for callers that do not need a directory."""
+
+    _resolve_subtitle_font_directory(
+        report, fonts_dir=None, allow_missing_font=allow_missing_font
+    )
 
 
 def _audio_options(audio_streams: Sequence[dict[str, Any]]) -> tuple[list[str], list[str]]:
@@ -537,6 +576,7 @@ def _encode_command(
     crf: int,
     preset: str,
     encoder: str,
+    fonts_dir: Path | None = None,
 ) -> tuple[list[str], list[str]]:
     try:
         stream_index = int(video_stream["index"])
@@ -545,6 +585,8 @@ def _encode_command(
 
     audio_options, audio_modes = _audio_options(audio_streams)
     subtitle_filter = f"subtitles=filename={_escape_filter_value(str(subtitle))}"
+    if fonts_dir is not None:
+        subtitle_filter += f":fontsdir={_escape_filter_value(str(fonts_dir))}"
     command = [
         ffmpeg,
         "-hide_banner",
@@ -660,6 +702,7 @@ def burn_subtitles(
     encoder: str = DEFAULT_ENCODER,
     validation_report: Path | None = None,
     allow_missing_font: bool = False,
+    fonts_dir: Path | None = None,
 ) -> list[str]:
     video = video.expanduser().resolve()
     subtitle = subtitle.expanduser().resolve()
@@ -690,7 +733,9 @@ def burn_subtitles(
         raise BurnError("encoder cannot be empty")
 
     report = _validate_validation_report(subtitle, report_path)
-    _require_subtitle_font(report, allow_missing_font=allow_missing_font)
+    resolved_fonts_dir = _resolve_subtitle_font_directory(
+        report, fonts_dir=fonts_dir, allow_missing_font=allow_missing_font
+    )
 
     ffmpeg, ffprobe = _required_executables()
     _require_libass_subtitles_filter(ffmpeg)
@@ -721,6 +766,7 @@ def burn_subtitles(
         crf=crf,
         preset=preset,
         encoder=encoder,
+        fonts_dir=resolved_fonts_dir,
     )
     returncode, diagnostic = _run_ffmpeg_with_progress(command, input_duration)
     if returncode != 0:
@@ -757,6 +803,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             encoder=args.encoder,
             validation_report=args.validation_report,
             allow_missing_font=args.allow_missing_font,
+            fonts_dir=args.fonts_dir,
         )
     except (BurnError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
