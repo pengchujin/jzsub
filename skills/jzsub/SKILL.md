@@ -111,4 +111,4 @@ Exit 3 identifies the unfinished stage; continue it immediately. Report success 
 - If MP4 remux fails, keep the best source and perform only the final burn transcode.
 - Warn that the compatibility burn does not promise HDR preservation.
 
-Report actual artifacts, resolution, codecs, selected subtitle language/kind, and whether Chrome authentication was used—never account or cookie details.
+Report actual artifacts, resolution, codecs, selected subtitle language/kind, and whether Chrome authentication was used—never account or cookie details. Make every local artifact directly openable in Codex: use an absolute Markdown target wrapped in angle brackets, for example `[打开双语字幕版](</absolute/job/path/双语字幕版「视频名」.mp4>)`. For the final MP4, also provide an inline video preview as `![双语字幕版](</absolute/job/path/双语字幕版「视频名」.mp4>)`. Never emit a bare path or an unwrapped Markdown target containing spaces or parentheses.
