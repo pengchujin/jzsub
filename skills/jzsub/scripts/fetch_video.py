@@ -122,19 +122,22 @@ def delivery_names(title: Any, target_language: str) -> dict[str, str]:
         clean_title = f"_{clean_title}"
     language = _language_base(target_language)
     if language in {"zh", "zho", "chi", "cmn", "yue", "wuu"}:
-        cover = "封面.jpg"
+        cover_prefix = "封面"
         prefix = "双语字幕版"
     elif language in {"ja", "jpn"}:
-        cover = "カバー.jpg"
+        cover_prefix = "カバー"
         prefix = "二言語字幕版"
     else:
-        cover = "cover.jpg"
+        cover_prefix = "cover"
         prefix = "Bilingual Subtitled"
     suffix = "」.mp4"
-    budget = 240 - len(f"{prefix}「{suffix}".encode("utf-8"))
+    budget = min(
+        240 - len(f"{cover_prefix}-.jpg".encode("utf-8")),
+        240 - len(f"{prefix}「{suffix}".encode("utf-8")),
+    )
     clean_title = _truncate_utf8(clean_title, max(1, budget)).rstrip(" ._") or "untitled"
     return {
-        "cover": cover,
+        "cover": f"{cover_prefix}-{clean_title}.jpg",
         "bilingual_video": f"{prefix}「{clean_title}」.mp4",
     }
 
@@ -1446,7 +1449,7 @@ def run_self_tests() -> bool:
     class FetchVideoTests(unittest.TestCase):
         def test_delivery_names_follow_target_language(self) -> None:
             names = delivery_names("Parking / Sensor", "zh-CN")
-            self.assertEqual(names["cover"], "封面.jpg")
+            self.assertEqual(names["cover"], "封面-Parking _ Sensor.jpg")
             self.assertEqual(
                 names["bilingual_video"],
                 "双语字幕版「Parking _ Sensor」.mp4",
@@ -1454,16 +1457,18 @@ def run_self_tests() -> bool:
 
         def test_delivery_names_use_japanese_for_japanese_target(self) -> None:
             names = delivery_names("Parking Sensor", "ja")
-            self.assertEqual(names["cover"], "カバー.jpg")
+            self.assertEqual(names["cover"], "カバー-Parking Sensor.jpg")
             self.assertEqual(
                 names["bilingual_video"],
                 "二言語字幕版「Parking Sensor」.mp4",
             )
 
         def test_download_templates_use_localized_cover_name(self) -> None:
-            video, cover = download_output_templates("Parking [id]", "封面.jpg")
+            video, cover = download_output_templates(
+                "Parking [id]", "封面-Parking Sensor.jpg"
+            )
             self.assertEqual(video, "Parking [id].intermediate.%(ext)s")
-            self.assertEqual(cover, "thumbnail:封面.%(ext)s")
+            self.assertEqual(cover, "thumbnail:封面-Parking Sensor.%(ext)s")
 
         def test_safe_stem_blocks_traversal_and_keeps_id(self) -> None:
             self.assertEqual(safe_stem("../bad/name", "id"), "bad_name [id]")

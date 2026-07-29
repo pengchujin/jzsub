@@ -45,7 +45,7 @@ Authentication behavior:
 - Use `chrome:Profile 1` only when the user identifies that profile.
 - Load Chrome control only when login/CAPTCHA needs user interaction. Do not open the video merely to obtain cookies.
 
-The fetcher selects best video+audio, keeps a codec-preserving source, remuxes MP4 when compatible, downloads JPEG cover, chooses original-language manual captions before automatic captions, and writes `download-manifest.json`. Use its localized delivery names unchanged: the default Chinese target writes `封面.jpg` and returns a `burn_output` such as `双语字幕版「视频名」.mp4`.
+The fetcher selects best video+audio, keeps a codec-preserving source, remuxes MP4 when compatible, downloads JPEG cover, chooses original-language manual captions before automatic captions, and writes `download-manifest.json`. Use its localized delivery names unchanged: the default Chinese target writes `封面-视频名.jpg` and returns a `burn_output` such as `双语字幕版「视频名」.mp4`.
 
 ### Exit 0: video-only complete
 
