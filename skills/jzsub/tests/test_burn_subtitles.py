@@ -60,21 +60,41 @@ class BurnSubtitleValidationTests(unittest.TestCase):
     def test_missing_validated_font_fails_closed_with_override(self) -> None:
         report = self.report(font="MiSans")
 
-        with mock.patch.object(burn, "_font_installed", return_value=False):
-            with self.assertRaisesRegex(burn.BurnError, "MiSans.*not found"):
+        with mock.patch.object(burn, "_find_font_directory", return_value=None):
+            with self.assertRaisesRegex(burn.BurnError, "MiSans.*could not be located"):
                 burn._require_subtitle_font(report, allow_missing_font=False)
             burn._require_subtitle_font(report, allow_missing_font=True)
 
-        with mock.patch.object(burn, "_font_installed", return_value=True):
-            burn._require_subtitle_font(report, allow_missing_font=False)
-
-        with mock.patch.object(burn, "_font_installed", return_value=None):
+        with mock.patch.object(burn, "_find_font_directory", return_value=self.root):
             burn._require_subtitle_font(report, allow_missing_font=False)
 
     def test_reports_without_a_font_skip_the_font_gate(self) -> None:
-        with mock.patch.object(burn, "_font_installed") as detect:
+        with mock.patch.object(burn, "_find_font_directory") as detect:
             burn._require_subtitle_font(self.report(), allow_missing_font=False)
         detect.assert_not_called()
+
+    def test_font_directory_uses_only_the_requested_fontconfig_match(self) -> None:
+        font_file = self.root / "MiSans-Bold.otf"
+        font_file.write_text("font", encoding="utf-8")
+
+        with mock.patch.object(burn.shutil, "which", return_value="fc-match"):
+            with mock.patch.object(
+                burn.subprocess,
+                "run",
+                return_value=mock.Mock(
+                    returncode=0, stdout=f"MiSans\n{font_file}\n"
+                ),
+            ):
+                self.assertEqual(
+                    burn._font_directory_from_fc_match("MiSans", 700), self.root
+                )
+
+            with mock.patch.object(
+                burn.subprocess,
+                "run",
+                return_value=mock.Mock(returncode=0, stdout=f"Arial\n{font_file}\n"),
+            ):
+                self.assertIsNone(burn._font_directory_from_fc_match("MiSans", 700))
 
     def test_rejects_stale_ass_checksum(self) -> None:
         report = self.write_report()
@@ -113,6 +133,13 @@ class BurnSubtitleValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(args.validation_report, Path("reviewed.json"))
+
+    def test_cli_accepts_fonts_directory_override(self) -> None:
+        args = burn._parser().parse_args(
+            ["input.mp4", "bilingual.ass", "output.mp4", "--fonts-dir", "custom-fonts"]
+        )
+
+        self.assertEqual(args.fonts_dir, Path("custom-fonts"))
 
     def test_selects_libass_capable_ffmpeg_full_when_path_build_lacks_it(self) -> None:
         default = self.root / "bin" / "ffmpeg"
@@ -157,6 +184,27 @@ class BurnSubtitleValidationTests(unittest.TestCase):
         self.assertIn("-nostats", command)
         self.assertEqual(command[command.index("-loglevel") + 1], "error")
         self.assertEqual(command[command.index("-progress") + 1], "pipe:1")
+
+    def test_encode_command_explicitly_loads_resolved_font_directory(self) -> None:
+        fonts_dir = self.root / "fonts with space"
+        command, _ = burn._encode_command(
+            "ffmpeg",
+            self.root / "input.mkv",
+            self.subtitle,
+            self.root / "output.mp4",
+            {"index": 0},
+            [],
+            force=False,
+            crf=18,
+            preset="slow",
+            encoder="libx264",
+            fonts_dir=fonts_dir,
+        )
+
+        subtitle_filter = command[command.index("-vf") + 1]
+        self.assertIn("subtitles=filename=", subtitle_filter)
+        self.assertIn("fontsdir=", subtitle_filter)
+        self.assertIn(str(fonts_dir), subtitle_filter)
 
     def test_rejects_output_duration_mismatch(self) -> None:
         input_video = {

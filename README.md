@@ -122,7 +122,7 @@ python3 skills/jzsub/scripts/fetch_video.py "<url>" \
 
 ## 依赖
 
-Python 3.10+、yt-dlp、Deno 2.3+、带 libass 的 FFmpeg/ffprobe，以及 MiSans Bold。macOS 可运行：
+Python 3.10+、yt-dlp、Deno 2.3+、带 libass 的 FFmpeg/ffprobe，以及 MiSans Bold。烧录时会自动将已解析的 MiSans 字体目录传给 libass；如果字体装在非标准位置，可传 `--fonts-dir` 覆盖。macOS 可运行：
 
 ```bash
 brew install yt-dlp ffmpeg-full deno
